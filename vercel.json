@@ -1,0 +1,8 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "redirects": [
+    { "source": "/02 Landing Light", "destination": "/", "permanent": false },
+    { "source": "/04 Product Demo - final", "destination": "/demo", "permanent": false }
+  ]
+}

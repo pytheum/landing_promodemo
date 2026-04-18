@@ -52,32 +52,89 @@
   /* SHELL */
   .app { position: relative; z-index: 1; height: calc(100vh - 32px); display: grid; grid-template-rows: 44px 32px 1fr 26px; }
 
-  /* DISCLAIMER BANNER */
+  /* DISCLAIMER — MODAL + BANNER (crossfade) */
   .disclaimer-bar {
     height: 32px; display: flex; align-items: center; justify-content: center;
-    gap: 14px; padding: 0 44px 0 16px;
+    gap: 14px; padding: 0 16px;
     background: rgba(255, 185, 94, 0.08);
     border-bottom: 1px solid rgba(255, 185, 94, 0.25);
     font-family: 'JetBrains Mono', monospace;
     font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
     color: var(--amber);
     position: relative; z-index: 2;
+    cursor: pointer;
+    transition: background 0.15s;
   }
+  .disclaimer-bar:hover { background: rgba(255, 185, 94, 0.14); }
   .disclaimer-bar .lead { font-weight: 700; letter-spacing: 0.18em; }
   .disclaimer-bar .sep { opacity: 0.4; }
   .disclaimer-bar .body {
     color: rgba(232,236,239,0.78);
     letter-spacing: 0.08em; text-transform: none; font-weight: 400;
   }
-  .disclaimer-bar .close {
-    position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-    color: var(--muted); font-size: 14px; line-height: 1;
-    padding: 4px 8px; cursor: pointer; border-radius: 2px;
-    background: transparent; border: none;
+  .disclaimer-bar .gl {
+    color: rgba(232,236,239,0.55); font-size: 11px;
+    letter-spacing: 0; margin-left: 2px;
   }
-  .disclaimer-bar .close:hover { color: var(--ink); background: rgba(232,236,239,0.06); }
-  body.disclaimer-dismissed .disclaimer-bar { display: none; }
-  body.disclaimer-dismissed .app { height: 100vh; }
+
+  .disc-scrim {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    transition: opacity 0.3s ease;
+  }
+  .disc-scrim.hide { opacity: 0; pointer-events: none; }
+  .disc-card {
+    width: 520px; max-width: 100%;
+    background: var(--paper-2); border: 1px solid var(--rule-strong);
+    border-radius: 8px; overflow: hidden;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6);
+    transform: translateY(0); opacity: 1;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+  .disc-scrim.hide .disc-card { transform: translateY(8px); opacity: 0; }
+  .disc-card .hd {
+    padding: 14px 24px; border-bottom: 1px solid var(--rule);
+    display: flex; align-items: center; gap: 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--amber);
+  }
+  .disc-card .hd .d {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--amber); box-shadow: 0 0 8px var(--amber);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .disc-card .bd { padding: 28px 24px 22px; }
+  .disc-card h2 {
+    font-family: 'Alliance No.1','Inter',sans-serif;
+    font-size: 23px; font-weight: 500; letter-spacing: -0.015em;
+    color: var(--ink); margin-bottom: 14px; line-height: 1.25;
+  }
+  .disc-card p {
+    font-family: 'Alliance No.1','Inter',sans-serif;
+    font-size: 13px; line-height: 1.55;
+    color: rgba(232,236,239,0.78);
+    margin-bottom: 10px;
+  }
+  .disc-card p:last-of-type { margin-bottom: 0; }
+  .disc-card .ft {
+    padding: 14px 24px; border-top: 1px solid var(--rule);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  }
+  .disc-card .ft .ok {
+    padding: 9px 18px; background: var(--cyan); color: #0a0c0e;
+    border-radius: 3px; font-weight: 500; cursor: pointer;
+    letter-spacing: 0.12em; border: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    text-transform: uppercase;
+    transition: transform 0.1s;
+  }
+  .disc-card .ft .ok:hover { transform: translateY(-1px); }
 
   /* TOP BAR */
   .topbar {
@@ -249,6 +306,54 @@
   }
   .c-head .actions button:hover { color: var(--ink); border-color: var(--rule-strong); }
 
+  /* Market headline + outcomes */
+  .c-question {
+    padding: 11px 20px 13px;
+    border-bottom: 1px solid var(--rule);
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 28px;
+    background: rgba(127,200,255,0.025);
+  }
+  .c-question .q-text {
+    display: flex; flex-direction: column; gap: 4px;
+    min-width: 0; flex: 1;
+  }
+  .c-question .q-text .q {
+    font-size: 14px; color: var(--ink); font-weight: 500;
+    letter-spacing: -0.005em; line-height: 1.35;
+  }
+  .c-question .q-text .res {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px; color: var(--muted); letter-spacing: 0.06em;
+  }
+  .c-question .q-outcomes {
+    display: flex; flex-direction: column; gap: 4px;
+    min-width: 220px; max-width: 300px; flex-shrink: 0;
+  }
+  .c-question .q-outcomes.hidden { display: none; }
+  .c-question .q-outcomes .oc {
+    display: grid; grid-template-columns: 1fr 60px 30px; gap: 8px;
+    align-items: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+  }
+  .c-question .q-outcomes .oc .nm {
+    color: rgba(232,236,239,0.78);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .c-question .q-outcomes .oc.lead .nm { color: var(--ink); font-weight: 500; }
+  .c-question .q-outcomes .oc .bar {
+    height: 4px; background: rgba(232,236,239,0.08);
+    border-radius: 2px; position: relative;
+  }
+  .c-question .q-outcomes .oc .bar .f {
+    position: absolute; inset: 0 auto 0 0;
+    background: rgba(127,200,255,0.55); border-radius: 2px;
+  }
+  .c-question .q-outcomes .oc.lead .bar .f { background: var(--cyan); }
+  .c-question .q-outcomes .oc .pct {
+    color: var(--ink); font-variant-numeric: tabular-nums; text-align: right;
+  }
+
   .tabs { display: flex; border-bottom: 1px solid var(--rule); padding: 0 20px; gap: 2px; }
   .tab {
     font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
@@ -331,9 +436,14 @@
   .play-btn.on { background: var(--cyan); color: var(--paper); border-color: var(--cyan); }
   .play-btn .gly { font-size: 9px; }
   .scrub-track {
-    position: relative; height: 28px; cursor: pointer;
+    position: relative; height: 28px; cursor: grab;
     border: 1px solid var(--rule); background: var(--paper-2);
+    user-select: none; -webkit-user-select: none;
+    touch-action: none;
+    transition: border-color 0.15s;
   }
+  .scrub-track:hover { border-color: var(--rule-strong); }
+  .scrub-track.dragging { cursor: grabbing; border-color: var(--cyan); }
   .scrub-ruler {
     position: absolute; inset: 0;
     background-image:
@@ -357,7 +467,6 @@
     position: absolute; top: -2px; bottom: -2px; width: 2px;
     background: var(--cyan); box-shadow: 0 0 12px var(--cyan);
     pointer-events: none;
-    transition: left 0.06s linear;
   }
   .scrub-playhead .ph-label {
     position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
@@ -668,11 +777,11 @@
 </head>
 <body>
 
-<div class="disclaimer-bar">
+<div class="disclaimer-bar" id="disc-bar" title="Click to re-read the prototype notice">
   <span class="lead">Prototype</span>
   <span class="sep">·</span>
   <span class="body">Archive not yet online. All values shown are illustrative. Full data collection begins Q3 2026.</span>
-  <button class="close" onclick="document.body.classList.add('disclaimer-dismissed')" title="Dismiss">×</button>
+  <span class="gl">&#9432;</span>
 </div>
 
 <div class="app">
@@ -681,8 +790,6 @@
   <header class="topbar">
     <div class="brand">
       <span class="mark">Ephemeris</span>
-      <span class="badge">DEV</span>
-      <span style="color:var(--muted);font-size:10px">v0.1.4</span>
     </div>
     <div class="topbar-mid">
       <button class="cmdk" id="cmdk-open">
@@ -691,23 +798,21 @@
       </button>
     </div>
     <div class="topbar-right">
-      <span class="pip"><span class="d"></span><span class="lat" id="lat"><span id="lat-ms">318</span>ms</span></span>
-      <span id="clock">14:32 EDT</span>
-      <span class="user">EM</span>
+      <span class="user">&mdash;</span>
     </div>
   </header>
 
   <!-- CATEGORY RAIL -->
   <nav class="catrail" id="catrail">
-    <button class="cat active" data-cat="all">All <span class="ct">2,418</span></button>
-    <button class="cat" data-cat="econ">Econ <span class="ct">214</span></button>
-    <button class="cat" data-cat="politics">Politics <span class="ct">612</span></button>
-    <button class="cat" data-cat="crypto">Crypto <span class="ct">338</span></button>
-    <button class="cat" data-cat="sports">Sports <span class="ct">902</span></button>
-    <button class="cat" data-cat="climate">Climate <span class="ct">88</span></button>
-    <button class="cat" data-cat="science">Science <span class="ct">47</span></button>
-    <button class="cat" data-cat="culture">Culture <span class="ct">126</span></button>
-    <button class="cat" data-cat="geo">Geopolitics <span class="ct">91</span></button>
+    <button class="cat active" data-cat="all">All</button>
+    <button class="cat" data-cat="econ">Econ</button>
+    <button class="cat" data-cat="politics">Politics</button>
+    <button class="cat" data-cat="crypto">Crypto</button>
+    <button class="cat" data-cat="sports">Sports</button>
+    <button class="cat" data-cat="climate">Climate</button>
+    <button class="cat" data-cat="science">Science</button>
+    <button class="cat" data-cat="culture">Culture</button>
+    <button class="cat" data-cat="geo">Geopolitics</button>
   </nav>
 
   <!-- MAIN -->
@@ -782,7 +887,7 @@
         <div class="title">
           <span class="sym" id="c-sym">WILL_FED_CUT_MAY_2026</span>
           <span class="sep">/</span>
-          <span class="qmeta" id="c-meta">2026-01-01 .. 2026-04-17 · 1s · 287,419 rows</span>
+          <span class="qmeta" id="c-meta">2026-01-01 .. 2026-04-17 · 1s · example dataset</span>
         </div>
         <div class="actions">
           <button>Export</button>
@@ -791,8 +896,16 @@
         </div>
       </div>
 
+      <div class="c-question">
+        <div class="q-text">
+          <div class="q" id="q-headline">Will the Fed cut rates at the May 2026 FOMC meeting?</div>
+          <div class="res" id="q-resolution">Binary · Kalshi · resolves YES if FOMC announces a cut on/before 2026-05-14</div>
+        </div>
+        <div class="q-outcomes hidden" id="q-outcomes"></div>
+      </div>
+
       <div class="tabs">
-        <button class="tab" data-tab="table">Table <span class="ct">287,419</span></button>
+        <button class="tab" data-tab="table">Table</button>
         <button class="tab active" data-tab="chart">Chart</button>
         <button class="tab" data-tab="raw">Raw</button>
       </div>
@@ -807,7 +920,6 @@
                 <div><div>YES</div><div class="v" id="cm-yes">0.691</div></div>
                 <div><div>24H Δ</div><div class="v pos" id="cm-dy">+0.083</div></div>
                 <div><div>VOL 24H</div><div class="v" id="cm-vol">41.2k</div></div>
-                <div><div>DEPTH</div><div class="v">$1.84M</div></div>
               </div>
               <div class="chart-cursor-label" id="cm-cursor">
                 <span class="ts">03-19 14:00</span> · yes 0.721
@@ -832,7 +944,7 @@
                 </div>
               </div>
               <div class="scrub-right">
-                <span class="mode-pill" id="mode-pill"><span class="md-dot"></span><span id="mode-txt">LIVE TAIL</span></span>
+                <span class="mode-pill hist" id="mode-pill"><span class="md-dot"></span><span id="mode-txt">CURSOR</span></span>
               </div>
             </div>
           </div>
@@ -936,20 +1048,14 @@
   <!-- STATUS BAR -->
   <footer class="statusbar">
     <div class="L">
-      <span>env <span class="v">dev</span></span>
-      <span class="sep"></span>
       <span>workspace <span class="v">ephemeris-nyc</span></span>
       <span class="sep"></span>
       <span>query <span class="v" id="sb-query">FOMC_cuts_2026</span></span>
     </div>
     <div class="R">
-      <span>rows <span class="v" id="sb-rows">287,419</span></span>
-      <span class="sep"></span>
       <span>joined <span class="v">14 ctx fields</span></span>
       <span class="sep"></span>
-      <span>last tick <span class="v" id="sb-tick">+0.8s</span></span>
-      <span class="sep"></span>
-      <span>wire→disk <span class="v" id="sb-lat">318ms</span></span>
+      <span>dataset <span class="v">example</span></span>
     </div>
   </footer>
 
@@ -996,6 +1102,42 @@ const densitySeries = Array.from({length: N}, (_, i) => {
 });
 
 /* Chart rendering */
+/* Per-kind time axis + annotations */
+const KIND_AXIS = {
+  econ:        ['JAN','FEB','MAR','APR'],
+  esports:     ['00m','20m','40m','60m'],
+  sports_trad: ['Q1','Q2','Q3','Q4'],
+  nba:         ['12:00','8:00','4:00','00:00'],
+  football:    ["45'","60'","75'","90'"],
+};
+const KIND_ANNOTATIONS = {
+  econ: [
+    { idx: 60,  src: 'BBG', txt: 'CPI 2.8% YoY' },
+    { idx: 120, src: 'REU', txt: 'NFP miss 143k v 190k' },
+    { idx: 180, src: 'WSJ', txt: 'FOMC hold, dots softened' },
+  ],
+  esports: [
+    { idx: 34,  src: 'DT',  txt: 'First blood · mid' },
+    { idx: 95,  src: 'DT',  txt: 'Radiant T1 bot falls' },
+    { idx: 160, src: 'DT',  txt: 'Roshan killed · aegis Radiant' },
+  ],
+  sports_trad: [
+    { idx: 40,  src: 'PBP', txt: 'KC TD · Rice 24yd' },
+    { idx: 120, src: 'PBP', txt: 'BUF 48yd FG good' },
+    { idx: 200, src: 'PBP', txt: 'KC 4th down conversion' },
+  ],
+  nba: [
+    { idx: 50,  src: 'PBP', txt: 'LAL 12-0 run' },
+    { idx: 130, src: 'PBP', txt: 'Tatum 3 ties game' },
+    { idx: 210, src: 'PBP', txt: 'LAL clutch and-1' },
+  ],
+  football: [
+    { idx: 55,  src: 'OPT', txt: "Vinicius opens scoring · 52'" },
+    { idx: 140, src: 'OPT', txt: "De Bruyne equalises · 71'" },
+    { idx: 210, src: 'OPT', txt: "Bellingham restores lead · 83'" },
+  ],
+};
+
 function drawChart() {
   const svg = document.getElementById('chart-svg');
   const W = 1000, H = 400, PAD = 28;
@@ -1012,10 +1154,7 @@ function drawChart() {
     grid += `<line x1="${PAD}" x2="${W-PAD}" y1="${y}" y2="${y}" stroke="rgba(232,236,239,0.06)" stroke-width="1"/>`;
     grid += `<text x="${PAD-4}" y="${y+3}" font-family="JetBrains Mono" font-size="9" fill="rgba(232,236,239,0.38)" text-anchor="end">${lvl}</text>`;
   }
-  let months;
-  if (window.CURRENT_KIND === 'esports') months = ['00m','20m','40m','60m'];
-  else if (window.CURRENT_KIND === 'sports_trad') months = ['Q1','Q2','Q3','Q4'];
-  else months = ['JAN','FEB','MAR','APR'];
+  const months = KIND_AXIS[window.CURRENT_KIND] || KIND_AXIS.econ;
   months.forEach((m, i) => {
     const x = PAD + (W - PAD * 2) * (i / 3);
     grid += `<line x1="${x}" x2="${x}" y1="${PAD}" y2="${H-PAD}" stroke="rgba(232,236,239,0.05)"/>`;
@@ -1055,13 +1194,12 @@ function drawChart() {
     el.innerHTML = `<span class="src">${src}</span><span class="txt">${txt}</span>`;
     area.appendChild(el);
   };
-  makeAnn(60,  'BBG',  'CPI 2.8% YoY');
-  makeAnn(120, 'REU',  'NFP miss 143k v 190k');
-  makeAnn(180, 'WSJ',  'FOMC hold, dots softened');
+  (KIND_ANNOTATIONS[window.CURRENT_KIND] || KIND_ANNOTATIONS.econ)
+    .forEach(a => makeAnn(a.idx, a.src, a.txt));
 
-  // cursor label
+  // cursor label — use kind-aware cursor format
   document.getElementById('cm-cursor').innerHTML =
-    `<span class="ts">03-19 14:00</span> · yes ${priceSeries[180].toFixed(3)}`;
+    `<span class="ts">${fmtCursor(180)}</span> · yes ${priceSeries[180].toFixed(3)}`;
 }
 
 function drawDensity() {
@@ -1118,6 +1256,32 @@ function idxToDate(idx) {
   return d;
 }
 function fmtMD(idx)   { const d = idxToDate(idx); return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+/* Kind-aware cursor time format */
+function fmtCursor(idx) {
+  const kind = window.CURRENT_KIND;
+  const t = idx / Math.max(1, N - 1);
+  if (kind === 'esports') {
+    const sec = Math.round(t * 60 * 60);
+    return `${String(Math.floor(sec / 60)).padStart(2,'0')}:${String(sec % 60).padStart(2,'0')}`;
+  }
+  if (kind === 'sports_trad') {
+    const sec = Math.round(t * 60 * 60);
+    const q = Math.min(3, Math.floor(sec / (15*60))) + 1;
+    const qRem = 15*60 - (sec - (q-1) * 15*60);
+    return `Q${q} ${String(Math.floor(qRem/60)).padStart(2,'0')}:${String(qRem%60).padStart(2,'0')}`;
+  }
+  if (kind === 'nba') {
+    const qRem = 12 * 60 - Math.round(t * 12 * 60);
+    return `Q4 ${String(Math.floor(qRem/60)).padStart(2,'0')}:${String(qRem%60).padStart(2,'0')}`;
+  }
+  if (kind === 'football') {
+    const mins = 45 + Math.floor(t * 45);
+    const secs = Math.floor((t * 45 * 60) % 60);
+    return `${mins}'${String(secs).padStart(2,'0')}`;
+  }
+  return fmtMD(idx);
+}
 function fmtFullTs(idx, sec=0) {
   const d = idxToDate(idx);
   const m = Math.floor(rnd()*60);
@@ -1137,7 +1301,23 @@ function relT(offSec) {
 /* =========================================================
    Right pane renderer — the cursor-driven context
    ========================================================= */
+function updateScrubber(cursorIdx) {
+  const v = priceSeries[cursorIdx];
+  const cmCursor = document.getElementById('cm-cursor');
+  if (cmCursor) cmCursor.innerHTML = `<span class="ts">${fmtCursor(cursorIdx)}</span> · yes ${v.toFixed(3)}`;
+  const pct = (cursorIdx / (N - 1)) * 100;
+  const ph = document.getElementById('scrub-playhead');
+  const fill = document.getElementById('scrub-fill');
+  const phLabel = document.getElementById('ph-label');
+  if (ph) ph.style.left = pct + '%';
+  if (fill) fill.style.width = pct + '%';
+  if (phLabel) phLabel.textContent = fmtCursor(cursorIdx);
+}
+
 function renderContext(cursorIdx, opts={}) {
+  // Scrubber / cursor indicators update for EVERY kind
+  updateScrubber(cursorIdx);
+
   // --- kind dispatch: swap the whole right pane for non-econ queries ---
   const econEl = document.getElementById('rp-econ');
   const kindEl = document.getElementById('rp-kind');
@@ -1147,7 +1327,6 @@ function renderContext(cursorIdx, opts={}) {
       econEl.style.display = 'none';
       kindEl.style.display = '';
       kindEl.innerHTML = html;
-      // Keep the main timestamp in the top bar chart header fresh too
       return;
     }
   }
@@ -1229,42 +1408,35 @@ function renderContext(cursorIdx, opts={}) {
   const isLiveEdge = cursorIdx >= N - 2;
   const sources = 10 + Math.round(sorted[0].d < 6 ? 2 : sorted[0].d < 20 ? 1 : 0);
   document.getElementById('ctx-sync').textContent = isLiveEdge
-    ? `cursor · live tail · synced ${sources}/12 sources`
-    : `cursor · ${relT(-sorted[0].d * 30)} to nearest event · synced ${sources}/12 sources`;
+    ? `cursor · at edge of range`
+    : `cursor · ${relT(-sorted[0].d * 30)} to nearest event`;
 
-  // mode pill
+  // mode pill — always historical/cursor framing (no live tail claim in prototype)
   const pill = document.getElementById('mode-pill');
   const modeTxt = document.getElementById('mode-txt');
   pill.classList.remove('live','hist');
+  pill.classList.add('hist');
   if (isLiveEdge) {
-    pill.classList.add('live');
-    modeTxt.textContent = 'LIVE TAIL';
+    modeTxt.textContent = 'CURSOR / edge';
+  } else if (window.CURRENT_KIND && window.CURRENT_KIND !== 'econ') {
+    modeTxt.textContent = `CURSOR / ${fmtCursor(cursorIdx)}`;
   } else {
-    pill.classList.add('hist');
     const d = idxToDate(cursorIdx);
     const daysBack = Math.round((new Date(2026,3,17) - d) / 86400000);
-    modeTxt.textContent = `HISTORICAL / t−${daysBack}d`;
+    modeTxt.textContent = `CURSOR / t−${daysBack}d`;
   }
 
   // top-bar sync count (optional — element may not exist in minimal top bar)
   const sc = document.getElementById('sync-count');
   if (sc) sc.textContent = sources;
-
-  // chart cursor label + scrubber playhead
-  const v = priceSeries[cursorIdx];
-  document.getElementById('cm-cursor').innerHTML = `<span class="ts">${fmtMD(cursorIdx)}</span> · yes ${v.toFixed(3)}`;
-
-  const track = document.getElementById('scrub-track');
-  const pct = (cursorIdx / (N-1)) * 100;
-  document.getElementById('scrub-playhead').style.left = pct + '%';
-  document.getElementById('scrub-fill').style.width = pct + '%';
-  document.getElementById('ph-label').textContent = fmtMD(cursorIdx);
 }
 
-/* Seed events onto scrubber */
+/* Seed events onto scrubber — kind-aware */
 function renderScrubEvents() {
   const el = document.getElementById('scrub-events');
-  el.innerHTML = EVENTS.map(e => `<div class="ev" style="left:${(e.idx/(N-1))*100}%"></div>`).join('');
+  const kind = window.CURRENT_KIND;
+  const events = (kind && kind !== 'econ' && KIND_ANNOTATIONS[kind]) ? KIND_ANNOTATIONS[kind] : EVENTS;
+  el.innerHTML = events.map(e => `<div class="ev" style="left:${(e.idx/(N-1))*100}%"></div>`).join('');
 }
 renderScrubEvents();
 
@@ -1274,16 +1446,10 @@ renderScrubEvents();
 let cursorIdx = 180;
 renderContext(cursorIdx);
 
+/* Chart hover-to-scrub removed — cursor only moves on explicit scrubber drag/click or playback */
 const chartArea = document.getElementById('chart-area');
-chartArea.addEventListener('mousemove', (e) => {
-  if (playing) return;
-  const rect = chartArea.getBoundingClientRect();
-  const px = (e.clientX - rect.left) / rect.width;
-  cursorIdx = Math.max(0, Math.min(N - 1, Math.round(px * (N - 1))));
-  renderContext(cursorIdx);
-});
 
-/* Scrubber drag */
+/* Scrubber drag — YouTube-style click/drag + touch */
 const scrubTrack = document.getElementById('scrub-track');
 let dragging = false;
 function scrubTo(clientX) {
@@ -1292,9 +1458,24 @@ function scrubTo(clientX) {
   cursorIdx = Math.round(px * (N - 1));
   renderContext(cursorIdx);
 }
-scrubTrack.addEventListener('mousedown', (e) => { dragging = true; stopPlay(); scrubTo(e.clientX); });
+function beginDrag(clientX) {
+  dragging = true;
+  stopPlay();
+  scrubTrack.classList.add('dragging');
+  scrubTo(clientX);
+}
+function endDrag() {
+  if (!dragging) return;
+  dragging = false;
+  scrubTrack.classList.remove('dragging');
+}
+scrubTrack.addEventListener('mousedown', (e) => { e.preventDefault(); beginDrag(e.clientX); });
 window.addEventListener('mousemove', (e) => { if (dragging) scrubTo(e.clientX); });
-window.addEventListener('mouseup', () => { dragging = false; });
+window.addEventListener('mouseup', endDrag);
+scrubTrack.addEventListener('touchstart', (e) => { if (e.touches.length) { e.preventDefault(); beginDrag(e.touches[0].clientX); } }, { passive: false });
+window.addEventListener('touchmove', (e) => { if (dragging && e.touches.length) scrubTo(e.touches[0].clientX); }, { passive: false });
+window.addEventListener('touchend', endDrag);
+window.addEventListener('touchcancel', endDrag);
 
 /* Annotations → click to jump */
 document.addEventListener('click', (e) => {
@@ -1305,24 +1486,37 @@ document.addEventListener('click', (e) => {
   if (hit) { stopPlay(); cursorIdx = hit.idx; renderContext(cursorIdx); }
 });
 
-/* Playback sweep */
+/* Playback sweep — smooth requestAnimationFrame */
 let playing = false;
-let playTimer = null;
+let playRaf = null;
+const SWEEP_DURATION_MS = 14000; // full-range sweep
 function startPlay() {
   playing = true;
   const btn = document.getElementById('play-btn');
   btn.classList.add('on');
   document.getElementById('play-gly').textContent = '■';
   document.getElementById('play-lbl').textContent = 'STOP SWEEP';
-  playTimer = setInterval(() => {
-    cursorIdx = (cursorIdx + 1) % N;
+  const startIdx = cursorIdx >= N - 1 ? 0 : cursorIdx;
+  cursorIdx = startIdx;
+  const remaining = (N - 1) - startIdx;
+  const duration = Math.max(800, SWEEP_DURATION_MS * (remaining / (N - 1)));
+  const t0 = performance.now();
+  const tick = (now) => {
+    if (!playing) return;
+    const elapsed = now - t0;
+    const pct = Math.min(1, elapsed / duration);
+    cursorIdx = Math.min(N - 1, Math.floor(startIdx + pct * remaining));
     renderContext(cursorIdx);
-    if (cursorIdx >= N - 1) { stopPlay(); }
-  }, 90);
+    if (pct >= 1) { stopPlay(); return; }
+    playRaf = requestAnimationFrame(tick);
+  };
+  playRaf = requestAnimationFrame(tick);
 }
 function stopPlay() {
+  if (!playing && !playRaf) return;
   playing = false;
-  clearInterval(playTimer); playTimer = null;
+  if (playRaf) cancelAnimationFrame(playRaf);
+  playRaf = null;
   const btn = document.getElementById('play-btn');
   btn.classList.remove('on');
   document.getElementById('play-gly').textContent = '▶';
@@ -1346,17 +1540,97 @@ document.querySelectorAll('.tab').forEach(t => {
    Saved queries
    ========================================================= */
 const queries = {
-  fomc: { sym: 'WILL_FED_CUT_MAY_2026', label: 'FOMC_cuts_2026', rows: 287419, cad: '1s',   kind: 'econ' },
-  nyc:  { sym: 'NYCMAYOR_26_MAMDANI',   label: 'NYC_mayor_2026', rows: 162044, cad: '1s',   kind: 'econ' },
-  btc:  { sym: 'BTC_200K_EOY',          label: 'BTC_resolutions_Q2', rows: 892701, cad: '1s', kind: 'econ' },
-  cpi:  { sym: 'CPI_SUB_2PCT_JUN',      label: 'CPI_prints_2026', rows: 48033, cad: '60s',  kind: 'econ' },
-  dota: { sym: 'TI15_GRANDFINAL_G3',    label: 'DOTA_TI_GF_G3', rows: 214408, cad: '250ms', kind: 'esports' },
-  nfl:  { sym: 'NFL_SPREAD_W12_KC',     label: 'NFL_week_spreads', rows: 51128, cad: '1s',  kind: 'econ' },
-  nflg: { sym: 'NFL_SPREAD_KC_BUF',     label: 'NFL_KC_BUF_LIVE',  rows: 18204, cad: '500ms', kind: 'sports_trad' },
-  nba:  { sym: 'NBA_LINE_LAL_BOS',      label: 'NBA_LAL_BOS_Q4',   rows: 24610, cad: '500ms', kind: 'nba' },
-  ucl:  { sym: 'UCL_WINNER_RMA_MCI',    label: 'UCL_RMA_MCI_2H',   rows: 31802, cad: '500ms', kind: 'football' },
-  eth:  { sym: 'ETH_PECTRA_APR26',      label: 'ETH_upgrade_timing', rows: 71290, cad: '1s', kind: 'econ' },
+  fomc: {
+    sym: 'WILL_FED_CUT_MAY_2026', label: 'FOMC_cuts_2026', rows: 287419, cad: '1s', kind: 'econ',
+    question: 'Will the Fed cut rates at the May 2026 FOMC meeting?',
+    resolution: 'Binary · Kalshi · resolves YES if FOMC announces a cut on/before 2026-05-14',
+  },
+  nyc: {
+    sym: 'NYCMAYOR_26_WINNER', label: 'NYC_mayor_2026', rows: 162044, cad: '1s', kind: 'econ',
+    question: 'Who wins the 2026 NYC mayoral general election?',
+    resolution: 'Multi-outcome · Polymarket · resolves to NYS Board of Elections certified winner',
+    outcomes: [
+      { name: 'Zohran Mamdani', prob: 0.48 },
+      { name: 'Eric Adams',     prob: 0.18 },
+      { name: 'Andrew Cuomo',   prob: 0.14 },
+      { name: 'Brad Lander',    prob: 0.12 },
+      { name: 'Curtis Sliwa',   prob: 0.06 },
+      { name: 'Other',          prob: 0.02 },
+    ],
+  },
+  btc: {
+    sym: 'BTC_200K_EOY_2026', label: 'BTC_resolutions_Q2', rows: 892701, cad: '1s', kind: 'econ',
+    question: 'Will Bitcoin close above $200,000 on Dec 31, 2026?',
+    resolution: 'Binary · Kalshi · uses CF BRR close at 2026-12-31 16:00 ET',
+  },
+  cpi: {
+    sym: 'CPI_SUB_2PCT_JUN', label: 'CPI_prints_2026', rows: 48033, cad: '60s', kind: 'econ',
+    question: 'Will June 2026 CPI (YoY) print below 2.0%?',
+    resolution: 'Binary · Kalshi · resolves on the BLS June print released July 2026',
+  },
+  dota: {
+    sym: 'TI15_GRANDFINAL_G3', label: 'DOTA_TI_GF_G3', rows: 214408, cad: '250ms', kind: 'esports',
+    question: 'Who wins Game 3 of TI15 Grand Final: Radiant or Dire?',
+    resolution: 'Binary · Polymarket · resolves to the side that destroys the enemy Ancient',
+    outcomes: [
+      { name: 'Radiant', prob: 0.64 },
+      { name: 'Dire',    prob: 0.36 },
+    ],
+  },
+  nfl: {
+    sym: 'NFL_SPREAD_W12_KC', label: 'NFL_week_spreads', rows: 51128, cad: '1s', kind: 'econ',
+    question: 'Week 12: Will the Chiefs cover −3.5 at home vs Cleveland?',
+    resolution: 'Binary · Kalshi · point spread resolves on final score',
+  },
+  nflg: {
+    sym: 'NFL_SPREAD_KC_BUF', label: 'NFL_KC_BUF_LIVE', rows: 18204, cad: '500ms', kind: 'sports_trad',
+    question: 'KC vs BUF (live): Will KC cover −3.5 at the final whistle?',
+    resolution: 'Binary · Polymarket live spread, resolves at final whistle',
+  },
+  nba: {
+    sym: 'NBA_LINE_LAL_BOS', label: 'NBA_LAL_BOS_Q4', rows: 24610, cad: '500ms', kind: 'nba',
+    question: 'LAL vs BOS (live, Q4): Will LAL cover +5.5?',
+    resolution: 'Binary · Polymarket live spread, resolves at final buzzer',
+  },
+  ucl: {
+    sym: 'UCL_RMA_MCI_RESULT', label: 'UCL_RMA_MCI_2H', rows: 31802, cad: '500ms', kind: 'football',
+    question: 'Real Madrid vs Manchester City (live, 2H): 3-way result?',
+    resolution: 'Multi-outcome · Polymarket · resolves to the 90-minute result (incl. stoppage)',
+    outcomes: [
+      { name: 'Real Madrid',     prob: 0.58 },
+      { name: 'Draw',            prob: 0.22 },
+      { name: 'Manchester City', prob: 0.20 },
+    ],
+  },
+  eth: {
+    sym: 'ETH_PECTRA_APR26', label: 'ETH_upgrade_timing', rows: 71290, cad: '1s', kind: 'econ',
+    question: 'Will the Ethereum Pectra upgrade ship on mainnet by April 30, 2026?',
+    resolution: 'Binary · Polymarket · resolves YES on epoch activation confirmed by the EF',
+  },
 };
+
+function renderQuestion(q) {
+  const headline = document.getElementById('q-headline');
+  const res = document.getElementById('q-resolution');
+  const outcomesEl = document.getElementById('q-outcomes');
+  if (headline) headline.textContent = q.question || '—';
+  if (res) res.textContent = q.resolution || '';
+  if (!outcomesEl) return;
+  if (q.outcomes && q.outcomes.length > 1) {
+    const max = Math.max(...q.outcomes.map(o => o.prob));
+    const rows = q.outcomes.slice(0, 5).map((o, i) => `
+      <div class="oc ${o.prob === max ? 'lead' : ''}">
+        <div class="nm">${o.name}</div>
+        <div class="bar"><div class="f" style="width:${(o.prob * 100).toFixed(0)}%"></div></div>
+        <div class="pct">${(o.prob * 100).toFixed(0)}%</div>
+      </div>`).join('');
+    outcomesEl.innerHTML = rows;
+    outcomesEl.classList.remove('hidden');
+  } else {
+    outcomesEl.innerHTML = '';
+    outcomesEl.classList.add('hidden');
+  }
+}
 document.querySelectorAll('.saved-item').forEach(it => {
   it.addEventListener('click', () => {
     document.querySelectorAll('.saved-item').forEach(x => x.classList.remove('active'));
@@ -1367,17 +1641,23 @@ document.querySelectorAll('.saved-item').forEach(it => {
     document.getElementById('c-sym').textContent = q.sym;
     const isGame = (q.kind === 'esports' || q.kind === 'sports_trad');
     const metaDates = isGame
-      ? (q.kind === 'esports' ? 'game 3 · 00:00 .. 60:00 · 250ms · ' : 'live · Q1 .. Q4 · 500ms · ')
-      : `${document.getElementById('f-from').value} .. ${document.getElementById('f-to').value} · ${q.cad} · `;
-    document.getElementById('c-meta').textContent = `${metaDates}${q.rows.toLocaleString()} rows`;
+      ? (q.kind === 'esports' ? 'game 3 · 00:00 .. 60:00 · 250ms' : 'game · Q1 .. Q4 · 500ms')
+      : `${document.getElementById('f-from').value} .. ${document.getElementById('f-to').value} · ${q.cad}`;
+    document.getElementById('c-meta').textContent = `${metaDates} · example dataset`;
     document.getElementById('sb-query').textContent = q.label;
-    document.getElementById('sb-rows').textContent = q.rows.toLocaleString();
-    document.querySelector('.tab[data-tab="table"] .ct').textContent = q.rows.toLocaleString();
+    renderQuestion(q);
+    drawChart();
+    renderScrubEvents();
     renderContext(cursorIdx);
   });
 });
-// initialize kind for the default active query
-window.CURRENT_KIND = (queries[document.querySelector('.saved-item.active')?.dataset.q] || {}).kind || 'econ';
+// initialize kind + question headline for the default active query
+(function initActiveQuery() {
+  const activeKey = document.querySelector('.saved-item.active')?.dataset.q;
+  const q = queries[activeKey];
+  if (q) { window.CURRENT_KIND = q.kind; renderQuestion(q); }
+  else   { window.CURRENT_KIND = 'econ'; }
+})();
 
 /* =========================================================
    Context toggles
@@ -1452,20 +1732,7 @@ setInterval(() => {
   document.getElementById('cm-yes').textContent = liveYes.toFixed(3);
 }, 1200);
 
-/* =========================================================
-   Top bar: latency pip jitter, clock tick
-   ========================================================= */
-setInterval(() => {
-  const ms = 290 + Math.floor(Math.random() * 80);
-  document.getElementById('lat-ms').textContent = ms;
-  document.getElementById('sb-lat').textContent = ms + 'ms';
-  document.getElementById('sb-tick').textContent = '+' + (Math.random()*1.2).toFixed(1) + 's';
-}, 1400);
-setInterval(() => {
-  const d = new Date();
-  const pad = n => String(n).padStart(2,'0');
-  document.getElementById('clock').textContent = `2026-04-17 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} EDT`;
-}, 1000);
+/* Top bar latency / clock removed — prototype does not measure wire latency */
 
 /* =========================================================
    Category rail — tags each saved query with a category,
@@ -1507,6 +1774,39 @@ document.addEventListener('keydown', (e) => {
 });
 palette.addEventListener('click', (e) => { if (e.target === palette) palette.classList.remove('open'); });
 
+</script>
+
+<div class="disc-scrim" id="disc-modal">
+  <div class="disc-card">
+    <div class="hd"><span class="d"></span>Prototype preview</div>
+    <div class="bd">
+      <h2>This is what the workbench will look like.</h2>
+      <p>Full data collection from Kalshi and Polymarket has not yet begun. Every tick, chart, table row, and context entry shown here is illustrative &mdash; it demonstrates the shape of the product, not live market data.</p>
+      <p>Archive goes online Q3 2026. Come back then to query real history.</p>
+    </div>
+    <div class="ft">
+      <span>Ephemeris &middot; v0.1.4</span>
+      <button class="ok" id="disc-ok">Got it</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var modal = document.getElementById('disc-modal');
+  var bar   = document.getElementById('disc-bar');
+  var ok    = document.getElementById('disc-ok');
+  function dismiss() { modal.classList.add('hide'); }
+  function reopen()  { modal.classList.remove('hide'); }
+  ok.addEventListener('click', dismiss);
+  bar.addEventListener('click', reopen);
+  modal.addEventListener('click', function(e){
+    if (e.target === modal) dismiss();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && !modal.classList.contains('hide')) dismiss();
+  });
+})();
 </script>
 
 </body>
