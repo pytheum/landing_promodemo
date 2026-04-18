@@ -136,6 +136,151 @@
   }
   .disc-card .ft .ok:hover { transform: translateY(-1px); }
 
+  /* =======================================================
+     MOBILE DRAWER BUTTON (hidden on desktop)
+     ======================================================= */
+  .drawer-btn {
+    display: none;
+    width: 30px; height: 30px; align-items: center; justify-content: center;
+    border: 1px solid var(--rule-strong); border-radius: 4px;
+    background: transparent; color: var(--ink); cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1;
+    margin-right: 8px;
+  }
+  .drawer-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 80;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  body.drawer-open .drawer-overlay { opacity: 1; pointer-events: auto; }
+
+  /* =======================================================
+     MOBILE — stack panes vertically (<=900px)
+     ======================================================= */
+  @media (max-width: 900px) {
+    html, body { height: auto; }
+    body { overflow: auto; overflow-x: hidden; }
+
+    /* App becomes flex column, no fixed height */
+    .app { height: auto; min-height: 100vh; display: flex; flex-direction: column; }
+    body.disclaimer-dismissed .app { height: auto; }
+
+    /* Disclaimer banner stays sticky on scroll */
+    .disclaimer-bar { position: sticky; top: 0; z-index: 60; }
+
+    /* Topbar — simpler, hide cmd-k center */
+    .topbar { grid-template-columns: 1fr auto; padding: 0 12px; gap: 8px; height: 44px; }
+    .topbar .brand { gap: 8px; }
+    .topbar-mid { display: none; }
+    .topbar-right { gap: 8px; }
+    .drawer-btn { display: inline-flex; }
+
+    /* Show overlay container on mobile (opacity controlled by body.drawer-open) */
+    .drawer-overlay { display: block; }
+
+    /* Category rail — already scrolls horizontally */
+    .catrail { font-size: 10px; }
+    .cat { padding: 10px 14px; }
+
+    /* Main: flex column */
+    .main { display: flex; flex-direction: column; min-height: 0; }
+
+    /* Left pane → slide-in drawer */
+    .main > .pane:first-child {
+      position: fixed; top: 0; bottom: 0; left: -320px;
+      width: 292px; z-index: 90;
+      background: var(--paper);
+      border-right: 1px solid var(--rule-strong);
+      transition: left 0.25s ease;
+      box-shadow: 10px 0 40px rgba(0,0,0,0.5);
+    }
+    body.drawer-open .main > .pane:first-child { left: 0; }
+
+    /* Center + right panes flow vertically, full width */
+    .main > .pane:nth-child(2),
+    .main > .pane:nth-child(3) {
+      border-right: none;
+    }
+    .main > .pane:nth-child(2) {
+      border-bottom: 1px solid var(--rule);
+      min-height: 540px;
+    }
+    .main > .pane:nth-child(3) {
+      overflow: visible;
+    }
+
+    /* Center pane internal heights */
+    .c-body { min-height: 500px; }
+    .panel.active { overflow: visible; }
+    .chart-wrap { min-height: 460px; padding: 10px 12px 12px; gap: 8px; grid-template-rows: 1fr 56px auto; }
+    .chart-area { min-height: 280px; }
+    .chart-meta { font-size: 9px; gap: 10px; flex-wrap: wrap; top: 6px; left: 10px; }
+    .chart-cursor-label { top: 6px; right: 10px; font-size: 9px; padding: 3px 6px; }
+
+    /* Scrubber: bigger touch target */
+    .scrub-track { height: 44px; }
+    .play-btn { padding: 9px 12px 9px 10px; font-size: 10px; }
+
+    /* Chart header + question banner */
+    .c-head { flex-wrap: wrap; gap: 6px; padding: 10px 14px; }
+    .c-head .title { font-size: 10px; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; }
+    .c-head .title .sep { display: none; }
+    .c-head .title .qmeta { font-size: 9px; width: 100%; }
+    .c-head .actions { order: -1; align-self: flex-end; font-size: 9px; gap: 4px; }
+    .c-head .actions button { padding: 4px 8px; }
+
+    .c-question { flex-direction: column; gap: 12px; padding: 10px 14px 12px; }
+    .c-question .q-text .q { font-size: 13px; }
+    .c-question .q-text .res { font-size: 9px; }
+    .c-question .q-outcomes { min-width: 0; max-width: 100%; width: 100%; }
+
+    /* Tabs: horizontal scroll if needed */
+    .tabs { padding: 0 14px; overflow-x: auto; }
+    .tab { padding: 10px 12px; flex-shrink: 0; }
+
+    /* Table view */
+    .table-wrap { overflow-x: auto; }
+    table.ticks thead th { padding: 8px 12px; font-size: 9px; }
+    table.ticks tbody td { padding: 6px 12px; font-size: 10.5px; }
+
+    /* Raw view */
+    .raw-wrap { padding: 12px 14px; }
+    .raw pre { font-size: 10.5px; padding: 14px 16px; }
+
+    /* Right (context) pane blocks */
+    .ctx-stamp { padding: 12px 14px; }
+    .ctx-stamp .ts-big { font-size: 14px; }
+    .ctx-block { padding: 12px 14px 14px; }
+    .pane-head { padding: 10px 14px; }
+
+    /* Status bar: wrap + smaller */
+    .statusbar { padding: 8px 12px; font-size: 9px; flex-wrap: wrap; gap: 4px 12px; height: auto; min-height: 26px; }
+    .statusbar .L, .statusbar .R { gap: 10px; flex-wrap: wrap; }
+    .statusbar .sep { display: none; }
+
+    /* Disclaimer modal: fit small viewports */
+    .disc-card { width: 100%; }
+    .disc-card h2 { font-size: 20px; }
+    .disc-card .bd { padding: 22px 20px 18px; }
+
+    /* Mode pill + minimap tighter */
+    .mode-pill { font-size: 9px; padding: 4px 7px; }
+    .mm-wrap { font-size: 10px; }
+  }
+
+  /* Very narrow phones (<=430px) */
+  @media (max-width: 430px) {
+    .topbar .brand .mark { font-size: 15px; }
+    .chart-meta > div { min-width: 60px; }
+    .c-head .title { font-size: 9.5px; }
+    .chart-area { min-height: 220px; }
+    .chart-wrap { min-height: 380px; }
+  }
+
   /* TOP BAR */
   .topbar {
     display: grid; grid-template-columns: 220px 1fr minmax(340px, auto);
@@ -784,11 +929,14 @@
   <span class="gl">&#9432;</span>
 </div>
 
+<div class="drawer-overlay" id="drawer-overlay"></div>
+
 <div class="app">
 
   <!-- TOP BAR -->
   <header class="topbar">
     <div class="brand">
+      <button class="drawer-btn" id="drawer-toggle" aria-label="Open query drawer" title="Queries">&#8801;</button>
       <span class="mark">Ephemeris</span>
     </div>
     <div class="topbar-mid">
@@ -1805,6 +1953,23 @@ palette.addEventListener('click', (e) => { if (e.target === palette) palette.cla
   });
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && !modal.classList.contains('hide')) dismiss();
+  });
+})();
+
+// Mobile drawer toggle (left query pane)
+(function(){
+  var btn = document.getElementById('drawer-toggle');
+  var overlay = document.getElementById('drawer-overlay');
+  if (!btn) return;
+  function close() { document.body.classList.remove('drawer-open'); }
+  function toggle() { document.body.classList.toggle('drawer-open'); }
+  btn.addEventListener('click', function(e){ e.stopPropagation(); toggle(); });
+  if (overlay) overlay.addEventListener('click', close);
+  document.addEventListener('click', function(e){
+    if (e.target.closest('.saved-item') || e.target.closest('.run')) close();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') close();
   });
 })();
 </script>
