@@ -151,6 +151,8 @@
     width: 6px; height: 6px; border-radius: 50%; background: #16a34a;
     animation: pulse 2s ease-in-out infinite;
   }
+  .status-pill.amber { border-color: rgba(217,119,6,0.45); }
+  .status-pill.amber .p { background: #d97706; }
   @media (max-width: 720px) { .status-pill { position: static; margin-top: 20px; } }
 
   .hero .sub-row {
@@ -296,7 +298,7 @@
     display: flex; justify-content: space-between; align-items: center;
   }
   .sample-wrap .sh .dot {
-    width: 6px; height: 6px; border-radius: 50%; background: #16a34a;
+    width: 6px; height: 6px; border-radius: 50%; background: #d97706;
     animation: pulse 2s ease-in-out infinite;
   }
   .sample-wrap pre {
@@ -387,9 +389,9 @@
 
 <!-- HERO -->
 <section class="hero">
-  <div class="status-pill">
+  <div class="status-pill amber">
     <span class="p"></span>
-    <span>archive online / <span id="tick-count">2,413,904,217</span> ticks captured</span>
+    <span>prototype / archive begins Q3 2026</span>
   </div>
   <div class="grid">
     <div class="label"><span class="n">01</span><span class="t">Thesis</span></div>
@@ -398,10 +400,10 @@
     </div>
     <div class="sub-row">
       <p class="lede">
-        Every contract on Kalshi and Polymarket<sup>01</sup>, every tick, every surrounding signal. Archived in real time, served as history, forever.
+        Every tick on Kalshi and Polymarket<sup>01</sup>, paired with what the world knew at that moment. News, social, polling, on-chain, telemetry &mdash; synchronized, archived forever.
       </p>
       <div class="cta-stack">
-        <a href="#access" class="btn primary"><span>Request dataset access</span><span>&rarr;</span></a>
+        <a href="#access" class="btn primary"><span>Request early access</span><span>&rarr;</span></a>
         <a href="#contact" class="btn"><span>Talk to the team</span><span>&rarr;</span></a>
       </div>
     </div>
@@ -412,19 +414,19 @@
 <section class="stats">
   <div class="grid">
     <div class="stat">
-      <div class="k">Ticks archived</div>
+      <div class="k">Ticks / year 1 target</div>
       <div class="v">2.4<sup>B</sup></div>
     </div>
     <div class="stat">
-      <div class="k">Context records</div>
+      <div class="k">Context / year 1 target</div>
       <div class="v">18<sup>TB</sup></div>
     </div>
     <div class="stat">
-      <div class="k">Venue coverage</div>
+      <div class="k">Venues at launch</div>
       <div class="v">100<sup>%</sup></div>
     </div>
     <div class="stat">
-      <div class="k">Cadence</div>
+      <div class="k">Target cadence</div>
       <div class="v">1<sup>S</sup></div>
     </div>
   </div>
@@ -433,7 +435,7 @@
 <!-- ASCII -->
 <section class="hero-ascii">
   <div class="grid">
-    <div class="label"><span class="n">01.1</span><span class="t">Fig. A / Sample query output</span></div>
+    <div class="label"><span class="n">01.1</span><span class="t">Fig. A / Sample query output · illustrative</span></div>
     <pre><span class="d">$</span> <span class="b">eph query</span> WILL_FED_CUT_MAY_2026 --range 2026-01-01..<span id="ascii-date">2026-04-17</span> --context on
 
 <span class="d">┌─────────────┬──────┬──────┬────────┬──────────────────────────┐</span>
@@ -443,7 +445,7 @@
 <span class="d">│</span> 01-15 09:15 <span class="d">│</span> 0.51 <span class="d">│</span> 0.49 <span class="d">│</span>  38402 <span class="d">│</span> Powell hawkish, Econ Club <span class="d">│</span>
 <span class="d">│</span> 02-28 16:00 <span class="d">│</span> 0.63 <span class="d">│</span> 0.37 <span class="d">│</span>  67100 <span class="d">│</span> NFP miss, 143k v 190k    <span class="d">│</span>
 <span class="d">│</span> 03-19 14:00 <span class="d">│</span> <span class="b">0.72</span> <span class="d">│</span> 0.28 <span class="d">│</span>  89240 <span class="d">│</span> FOMC hold, dots softened  <span class="d">│</span>
-<span class="d">│</span> 04-17 <span id="ascii-time">12:00</span> <span class="d">│</span> <span class="b" id="ascii-yes">0.691</span> <span class="d">│</span> <span id="ascii-no">0.309</span> <span class="d">│</span>  <span id="ascii-vol">12500</span> <span class="d">│</span> &lt;live&gt;                    <span class="d">│</span>
+<span class="d">│</span> 04-17 <span id="ascii-time">12:00</span> <span class="d">│</span> <span class="b" id="ascii-yes">0.691</span> <span class="d">│</span> <span id="ascii-no">0.309</span> <span class="d">│</span>  <span id="ascii-vol">12500</span> <span class="d">│</span> &lt;illustrative&gt;           <span class="d">│</span>
 <span class="d">└─────────────┴──────┴──────┴────────┴──────────────────────────┘</span>
 
   <span class="d">price history / yes leg                           1s cadence</span>
@@ -476,12 +478,12 @@
       <div class="tcol">
         <div class="n">02.2 / Moat</div>
         <h3>History is a moat that compounds.</h3>
-        <p>A competitor who starts in 2027 cannot retroactively capture what we are capturing today. Every day the archive runs, it becomes harder to replicate. This is not a feature that can be cloned. It is a position in time.</p>
+        <p>A competitor who starts in 2028 cannot retroactively capture what we capture during this launch window. Every day the archive runs, it becomes harder to replicate. This is not a feature that can be cloned. It is a position in time, and the clock starts at Q3 2026.</p>
       </div>
       <div class="tcol">
         <div class="n">02.3 / Depth</div>
         <h3>Prices alone are not enough.</h3>
-        <p>Backtesting event markets requires knowing what the world looked like at each timestamp. News, social, polls, weather, game scores. Ephemeris archives the surrounding world in sync with every market tick. Nobody else does this.</p>
+        <p>Backtesting event markets requires the full knowledge state at each timestamp &mdash; news, social, polls, weather, game scores. Ephemeris archives the world around every tick, synchronized to the second. Nobody else does this.</p>
       </div>
     </div>
   </div>
@@ -495,7 +497,7 @@
 
     <div class="coverage-lists">
       <div>
-        <h3>Market layer <span class="tag">Live · 1s</span></h3>
+        <h3>Market layer <span class="tag">Target · 1s</span></h3>
         <dl>
           <dt>Venues</dt>
           <dd>Kalshi, Polymarket. Manifold and Insight on roadmap.</dd>
@@ -506,11 +508,11 @@
           <dt>Coverage</dt>
           <dd>Economics, politics, climate, crypto, sports, culture, science.</dd>
           <dt>Format</dt>
-          <dd>Parquet, CSV, JSONL. SQL query interface in beta.</dd>
+          <dd>Parquet, CSV, JSONL. SQL query interface on roadmap.</dd>
         </dl>
       </div>
       <div>
-        <h3>Context layer <span class="tag">Live · 15s</span></h3>
+        <h3>Context layer <span class="tag">Target · 15s</span></h3>
         <dl>
           <dt>News</dt>
           <dd>Synchronized headline snapshots from Bloomberg, Reuters, AP, and topic-specific feeds at every tick.</dd>
@@ -529,7 +531,7 @@
     <div class="sample-wrap">
       <div class="sh">
         <span>// Fig. B. Cross-source row, single timestamp</span>
-        <span style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>live</span>
+        <span style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>illustrative</span>
       </div>
 <pre>{
   <span class="k">"ts"</span>: "2024-11-05T23:14:07Z",
@@ -560,16 +562,16 @@
       <div class="faq-row">
         <div class="i">Q.01</div>
         <div>
-          <h4>How much data, today?</h4>
-          <p>2.4 billion market ticks across Kalshi and Polymarket since Q3 2024. 18TB of headline and social context, keyed to market timestamps. Growing at roughly 120GB per week.</p>
+          <h4>When does capture begin?</h4>
+          <p>Q3 2026. No archive exists today. Year-1 targets: 2.4 billion market ticks across Kalshi and Polymarket, 18TB of synchronized context, roughly 120GB per week growth. We are starting now because every day a competitor waits, they lose a day of history they cannot recover.</p>
         </div>
         <div class="tag">Scale</div>
       </div>
       <div class="faq-row">
         <div class="i">Q.02</div>
         <div>
-          <h4>Latency of capture.</h4>
-          <p>Liquid contracts captured at 1 second cadence from both venues. Wire-to-disk latency under 400ms for Kalshi, under 900ms for Polymarket. Context sampled at 15s to 5min depending on source.</p>
+          <h4>Target capture latency.</h4>
+          <p>1-second cadence for liquid contracts on both venues. Target wire-to-disk under 400ms for Kalshi, under 900ms for Polymarket. Context sampled at 15s to 5min depending on source. Engineering in progress; exact numbers at launch.</p>
         </div>
         <div class="tag">Perf</div>
       </div>
@@ -577,7 +579,7 @@
         <div class="i">Q.03</div>
         <div>
           <h4>Can I get redistributable data?</h4>
-          <p>Redistribution rights being cleared with Kalshi and Polymarket directly. Until then, access is research and internal-use only, under a standard data license. A public commercial API follows once rights are in place.</p>
+          <p>Redistribution rights will be negotiated with Kalshi and Polymarket before public launch. Early access is research and internal-use only, under a standard data license. A public commercial API follows once rights are in place.</p>
         </div>
         <div class="tag">Legal</div>
       </div>
@@ -592,8 +594,8 @@
       <div class="faq-row">
         <div class="i">Q.05</div>
         <div>
-          <h4>Why not scrape this myself?</h4>
-          <p>Because you would be starting now. We started earlier. A dataset that began eighteen months ago cannot be built by starting today, no matter how good your engineers are. The archive is a position in time, not a crawler.</p>
+          <h4>Why wait? Why not scrape this yourself?</h4>
+          <p>Because starting now is the point. Today, no archive exists. In twelve months, one will, and it will belong to whoever is running through this window. The moat is time itself. A competitor who arrives in 2028 cannot retrieve what we capture in 2026 and 2027, no matter how good their engineers are.</p>
         </div>
         <div class="tag">Moat</div>
       </div>
@@ -605,9 +607,9 @@
 <section id="access" class="endcta">
   <div class="grid">
     <div class="label"><span class="n">05</span><span class="t">Access</span></div>
-    <h2>The record nobody is keeping.<br><b>Come see what we have already captured.</b></h2>
+    <h2>The record nobody is keeping.<br><b>Start the archive with us.</b></h2>
     <div class="cta-row">
-      <a href="/cdn-cgi/l/email-protection#09616c656566496c79616c646c7b607a27717073367a7c6b636c6a7d344d687d687a6c7d2c3b39686a6a6c7a7a" class="btn primary"><span>Request dataset access</span><span>&rarr;</span></a>
+      <a href="/cdn-cgi/l/email-protection#09616c656566496c79616c646c7b607a27717073367a7c6b636c6a7d344d687d687a6c7d2c3b39686a6a6c7a7a" class="btn primary"><span>Request early access</span><span>&rarr;</span></a>
       <a href="/cdn-cgi/l/email-protection#f69e939a9a99b693869e939b93849f85d88e8f8c" class="btn" id="contact"><span>Talk to the team</span><span>&rarr;</span></a>
     </div>
   </div>
