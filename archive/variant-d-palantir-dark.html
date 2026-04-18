@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STELE // The archive for prediction markets.</title>
+<!--
+  Variant D: Palantir dark + Langchain clean hybrid
+  Wordmark: STELE
+  Dark theme. JetBrains Mono for data, Alliance No.1 for display.
+  Terminal-dense hero. Premium developer aesthetic.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --bg-elev: #111114;
+    --bg-elev-2: #16161a;
+    --ink: #f4f4f5;
+    --ink-soft: #c4c4c9;
+    --ink-mute: #6b6b74;
+    --rule: rgba(244,244,245,0.08);
+    --rule-strong: rgba(244,244,245,0.18);
+    --accent: #7fc8ff;
+    --green: #52e9a7;
+    --red: #ff6b6b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Alliance No.1', 'Inter', -apple-system, sans-serif;
+    background: var(--bg); color: var(--ink);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+    overflow-x: hidden;
+  }
+  ::selection { background: var(--accent); color: var(--bg); }
+
+  /* Background grid + subtle radial glow */
+  .bg-fx {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(1000px 600px at 50% -10%, rgba(127,200,255,0.12) 0%, transparent 60%),
+      radial-gradient(700px 500px at 90% 30%, rgba(82,233,167,0.05) 0%, transparent 60%),
+      var(--bg);
+  }
+  .bg-fx::after {
+    content: ''; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(244,244,245,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(244,244,245,0.025) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse at center, rgba(0,0,0,1), transparent 80%);
+  }
+
+  /* NAV */
+  nav {
+    position: sticky; top: 0; z-index: 60;
+    background: rgba(10,10,11,0.78);
+    backdrop-filter: blur(18px) saturate(160%);
+    border-bottom: 1px solid var(--rule);
+  }
+  .nav-inner {
+    max-width: 1280px; margin: 0 auto; padding: 14px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .wordmark {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 15px; font-weight: 600; letter-spacing: 0.22em;
+  }
+  .wordmark .mono {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent); font-size: 12px; font-weight: 500;
+    padding: 3px 8px; border: 1px solid rgba(127,200,255,0.3);
+    border-radius: 4px; letter-spacing: 0.1em;
+  }
+  nav ul { list-style: none; display: flex; gap: 36px; font-size: 14px; }
+  nav ul a {
+    color: var(--ink-soft); text-decoration: none; font-weight: 450;
+    transition: color 0.15s;
+  }
+  nav ul a:hover { color: var(--ink); }
+  nav .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 16px; border-radius: 8px;
+    background: var(--ink); color: var(--bg);
+    font-size: 13px; font-weight: 500; text-decoration: none;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;
+  }
+  nav .cta:hover { background: var(--accent); }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 28px; }
+
+  /* HERO */
+  .hero {
+    padding: 80px 0 80px;
+    position: relative;
+  }
+  .hero-meta {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    padding: 16px 0; margin-bottom: 48px;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink-mute);
+    letter-spacing: 0.08em;
+  }
+  .hero-meta .m {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .hero-meta .m .k { text-transform: uppercase; font-size: 10px; letter-spacing: 0.15em; }
+  .hero-meta .m .v { color: var(--ink); font-size: 13px; letter-spacing: 0.04em; }
+  .hero-meta .m .v.ok { color: var(--green); }
+  @media (max-width: 760px) { .hero-meta { grid-template-columns: repeat(2, 1fr); } }
+
+  h1.display {
+    font-size: clamp(52px, 7vw, 112px);
+    font-weight: 300; letter-spacing: -0.04em; line-height: 0.98;
+    max-width: 1100px;
+  }
+  h1.display b { font-weight: 600; }
+  h1.display .accent { color: var(--accent); font-weight: 400; }
+
+  .hero-body {
+    display: grid; grid-template-columns: 1.05fr 1fr; gap: 64px; align-items: start;
+    margin-top: 64px;
+  }
+  @media (max-width: 960px) { .hero-body { grid-template-columns: 1fr; } }
+
+  .hero-left .sub {
+    font-size: 19px; line-height: 1.5; color: var(--ink-soft);
+    margin-bottom: 32px; max-width: 500px;
+  }
+  .hero-left .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 22px; border-radius: 10px;
+    font-size: 14px; font-weight: 500; text-decoration: none;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: var(--ink); color: var(--bg); }
+  .btn-primary:hover { background: var(--accent); }
+  .btn-ghost {
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--rule-strong);
+  }
+  .btn-ghost:hover { background: var(--bg-elev); border-color: var(--ink-soft); }
+
+  .credibility {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+    padding-top: 24px; border-top: 1px solid var(--rule);
+  }
+  .credibility .c .v {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px; font-weight: 500; letter-spacing: -0.01em;
+  }
+  .credibility .c .v.accent { color: var(--accent); }
+  .credibility .c .v.green { color: var(--green); }
+  .credibility .c .k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--ink-mute); margin-top: 4px;
+  }
+
+  /* Terminal */
+  .terminal {
+    background: var(--bg-elev);
+    border: 1px solid var(--rule-strong);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.5),
+                0 0 0 1px rgba(127,200,255,0.05);
+  }
+  .terminal-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid var(--rule);
+    background: var(--bg-elev-2);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+  .terminal-bar .dots { display: flex; gap: 6px; }
+  .terminal-bar .dots span { width: 10px; height: 10px; border-radius: 50%; background: rgba(244,244,245,0.12); }
+  .terminal-bar .dots span:nth-child(1) { background: #ff6b6b; }
+  .terminal-bar .dots span:nth-child(2) { background: #f0c33c; }
+  .terminal-bar .dots span:nth-child(3) { background: #52e9a7; }
+  .terminal-bar .title { color: var(--ink-mute); margin-left: 6px; letter-spacing: 0.05em; }
+  .terminal-bar .status { margin-left: auto; color: var(--green); display: flex; align-items: center; gap: 6px; }
+  .terminal-bar .status .pip {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+    animation: blink 1.8s ease-in-out infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  pre.ascii {
+    padding: 22px 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; line-height: 1.5;
+    white-space: pre; overflow-x: auto;
+    color: var(--ink-soft);
+  }
+  pre.ascii .d { color: var(--ink-mute); }
+  pre.ascii .a { color: var(--accent); }
+  pre.ascii .g { color: var(--green); }
+  pre.ascii .r { color: var(--red); }
+  pre.ascii .b { color: var(--ink); font-weight: 600; }
+
+  /* LOGO STRIP */
+  .logos {
+    border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    padding: 40px 0;
+  }
+  .logos .inner {
+    display: grid; grid-template-columns: 200px 1fr; gap: 48px; align-items: center;
+  }
+  .logos .lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .logos .names {
+    display: flex; flex-wrap: wrap; gap: 40px;
+    font-size: 18px; font-weight: 500; color: var(--ink-soft);
+    letter-spacing: -0.01em;
+  }
+  @media (max-width: 700px) { .logos .inner { grid-template-columns: 1fr; } }
+
+  /* SECTION HEADER */
+  section.band {
+    border-top: 1px solid var(--rule);
+    padding: 140px 0;
+  }
+  .band-head {
+    display: grid; grid-template-columns: 200px 1fr; gap: 48px; align-items: start;
+    margin-bottom: 80px;
+  }
+  .band-head .lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--ink-mute); padding-top: 8px;
+  }
+  .band-head h2 {
+    font-size: clamp(40px, 5vw, 72px);
+    font-weight: 300; letter-spacing: -0.03em; line-height: 1.02;
+    max-width: 900px;
+  }
+  .band-head h2 b { font-weight: 600; }
+  .band-head h2 .accent { color: var(--accent); font-weight: 400; }
+  @media (max-width: 900px) { .band-head { grid-template-columns: 1fr; } }
+
+  /* THESIS */
+  .thesis-grid {
+    display: grid; grid-template-columns: 200px repeat(3, 1fr); gap: 32px;
+  }
+  @media (max-width: 900px) { .thesis-grid { grid-template-columns: 1fr; } }
+  .tcard {
+    background: var(--bg-elev);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 28px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .tcard:hover { border-color: var(--rule-strong); transform: translateY(-2px); }
+  .tcard .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.1em; color: var(--accent);
+    margin-bottom: 18px;
+  }
+  .tcard h3 {
+    font-size: 22px; font-weight: 500; letter-spacing: -0.02em;
+    line-height: 1.15; margin-bottom: 12px;
+  }
+  .tcard p { font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
+
+  /* COVERAGE */
+  .cov-row {
+    display: grid; grid-template-columns: 200px 1fr 1fr; gap: 32px;
+  }
+  @media (max-width: 900px) { .cov-row { grid-template-columns: 1fr; } }
+  .cov-panel {
+    background: var(--bg-elev);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 32px;
+  }
+  .cov-panel h3 {
+    font-size: 26px; font-weight: 500; letter-spacing: -0.02em;
+    margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .cov-panel .sub-h {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink-mute);
+    letter-spacing: 0.08em; margin-bottom: 28px;
+  }
+  .cov-panel h3 .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.12em;
+    padding: 4px 8px; border-radius: 4px;
+    background: rgba(82,233,167,0.12); color: var(--green);
+    font-weight: 500;
+  }
+  .cov-panel .badge.blue { background: rgba(127,200,255,0.12); color: var(--accent); }
+  .cov-panel dl {}
+  .cov-panel dt {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--ink-mute);
+    border-top: 1px solid var(--rule);
+    padding: 14px 0 4px;
+  }
+  .cov-panel dt:first-of-type { border-top: none; padding-top: 0; }
+  .cov-panel dd { font-size: 14px; line-height: 1.55; color: var(--ink-soft); padding-bottom: 14px; }
+
+  .sample-wrap {
+    margin-top: 48px;
+    display: grid; grid-template-columns: 200px 1fr; gap: 32px;
+  }
+  @media (max-width: 900px) { .sample-wrap { grid-template-columns: 1fr; } }
+  .sample-wrap .lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--ink-mute); padding-top: 8px;
+  }
+
+  /* FAQ */
+  .faq-row {
+    display: grid; grid-template-columns: 200px 1fr; gap: 32px;
+  }
+  @media (max-width: 900px) { .faq-row { grid-template-columns: 1fr; } }
+  .faq-list {}
+  .faq-item {
+    display: grid; grid-template-columns: 80px 1fr 100px; gap: 28px;
+    padding: 26px 0;
+    border-top: 1px solid var(--rule);
+    align-items: start;
+  }
+  .faq-item:last-child { border-bottom: 1px solid var(--rule); }
+  .faq-item .i {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.15em; color: var(--accent); padding-top: 6px;
+  }
+  .faq-item h4 {
+    font-size: 20px; font-weight: 500; letter-spacing: -0.015em;
+    margin-bottom: 8px;
+  }
+  .faq-item p { font-size: 14px; line-height: 1.55; color: var(--ink-soft); max-width: 680px; }
+  .faq-item .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-mute); text-align: right; padding-top: 8px;
+  }
+
+  /* END CTA */
+  .endcta {
+    padding: 160px 0;
+    border-top: 1px solid var(--rule);
+    background:
+      radial-gradient(600px 400px at 50% 50%, rgba(127,200,255,0.1) 0%, transparent 60%),
+      var(--bg);
+    text-align: center;
+  }
+  .endcta h2 {
+    font-size: clamp(48px, 7vw, 120px);
+    font-weight: 300; letter-spacing: -0.04em; line-height: 0.96;
+    max-width: 1100px; margin: 0 auto 48px;
+  }
+  .endcta h2 b { font-weight: 600; }
+  .endcta h2 .accent { color: var(--accent); font-weight: 400; }
+  .endcta .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--rule);
+    padding: 40px 0;
+  }
+  .foot-inner {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.08em;
+    color: var(--ink-mute);
+  }
+  .foot-inner a { color: var(--ink-soft); text-decoration: none; margin-right: 20px; }
+  .foot-inner a:hover { color: var(--accent); }
+  .foot-inner .right { text-align: right; }
+  @media (max-width: 700px) { .foot-inner { grid-template-columns: 1fr; } .foot-inner .right { text-align: left; } }
+</style>
+</head>
+<body>
+<div class="bg-fx"></div>
+
+<nav>
+  <div class="nav-inner">
+    <div class="wordmark">STELE <span class="mono">v0.1</span></div>
+    <ul>
+      <li><a href="#thesis">Thesis</a></li>
+      <li><a href="#coverage">Coverage</a></li>
+      <li><a href="#technical">Technical</a></li>
+      <li><a href="#access">Access</a></li>
+    </ul>
+    <a href="#access" class="cta">$ request_access →</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-meta">
+      <div class="m"><div class="k">// system</div><div class="v ok">● archive online</div></div>
+      <div class="m"><div class="k">// ticks</div><div class="v">2,410,382,917</div></div>
+      <div class="m"><div class="k">// venues</div><div class="v">kalshi · polymarket</div></div>
+      <div class="m"><div class="k">// uptime</div><div class="v">99.97%</div></div>
+    </div>
+
+    <h1 class="display">The <b>Bloomberg Terminal</b><br>for <span class="accent">prediction markets.</span></h1>
+
+    <div class="hero-body">
+      <div class="hero-left">
+        <p class="sub">Every contract on Kalshi and Polymarket, every tick, every surrounding signal. Archived in real time. Served as history, forever. The record nobody else is keeping.</p>
+        <div class="cta-row">
+          <a href="#access" class="btn btn-primary">$ request_access →</a>
+          <a href="#contact" class="btn btn-ghost">talk to the team →</a>
+        </div>
+        <div class="credibility">
+          <div class="c">
+            <div class="v accent">2.4B</div>
+            <div class="k">ticks archived</div>
+          </div>
+          <div class="c">
+            <div class="v">18TB</div>
+            <div class="k">context records</div>
+          </div>
+          <div class="c">
+            <div class="v green">1s</div>
+            <div class="k">capture cadence</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="terminal" aria-hidden="true">
+        <div class="terminal-bar">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="title">stele ~ archive/query</div>
+          <div class="status"><span class="pip"></span>live</div>
+        </div>
+<pre class="ascii"><span class="d">╭─ stele@archive ─</span> <span class="d">~</span> <span class="d">──────────────────────────────</span>
+<span class="a">▸</span> <span class="b">stele query</span> WILL_FED_CUT_MAY_2026 --range 2026-01-01..04-16 --ctx
+
+<span class="d">┌─────────────┬──────┬──────┬────────┬──────────────────────────┐</span>
+<span class="d">│</span> <span class="b">timestamp</span>   <span class="d">│</span> <span class="b">yes</span>  <span class="d">│</span> <span class="b">no</span>   <span class="d">│</span> <span class="b">volume</span> <span class="d">│</span> <span class="b">context</span>                  <span class="d">│</span>
+<span class="d">├─────────────┼──────┼──────┼────────┼──────────────────────────┤</span>
+<span class="d">│</span> 01-02 14:33 <span class="d">│</span> <span class="r">0.42</span> <span class="d">│</span> 0.58 <span class="d">│</span>  24100 <span class="d">│</span> CPI 2.8% YoY             <span class="d">│</span>
+<span class="d">│</span> 01-15 09:15 <span class="d">│</span> <span class="r">0.51</span> <span class="d">│</span> 0.49 <span class="d">│</span>  38402 <span class="d">│</span> Powell hawkish, Econ Club <span class="d">│</span>
+<span class="d">│</span> 02-28 16:00 <span class="d">│</span> <span class="g">0.63</span> <span class="d">│</span> 0.37 <span class="d">│</span>  67100 <span class="d">│</span> NFP miss, 143k v 190k    <span class="d">│</span>
+<span class="d">│</span> 03-19 14:00 <span class="d">│</span> <span class="g">0.72</span> <span class="d">│</span> 0.28 <span class="d">│</span>  89240 <span class="d">│</span> FOMC hold, dots softened  <span class="d">│</span>
+<span class="d">│</span> 04-16 12:00 <span class="d">│</span> <span class="g">0.69</span> <span class="d">│</span> 0.31 <span class="d">│</span>  12500 <span class="d">│</span> <span class="a">&lt;live&gt;</span>                    <span class="d">│</span>
+<span class="d">└─────────────┴──────┴──────┴────────┴──────────────────────────┘</span>
+
+  <span class="d">price history (yes)                           1s cadence</span>
+  0.80 <span class="d">┤</span>                                        <span class="g">▂▄▆</span>
+  0.70 <span class="d">┤</span>                                <span class="g">▁▂▄▆██████▆</span>
+  0.60 <span class="d">┤</span>                      <span class="g">▁▂▄▆████████████████▅</span>
+  0.50 <span class="d">┤</span>         <span class="a">▁▁▂▂▃▄▅▆▇</span>███████████████████<span class="a">▅</span>
+  0.40 <span class="d">┤</span><span class="r">▁▁▁▂▂▃▃▄▅</span>█████████████████████████<span class="r">▃</span>
+       <span class="d">└─────────────────────────────────────────────</span>
+        JAN           FEB          MAR         APR
+
+<span class="a">▸</span> 287,419 rows <span class="d">│</span> 1.3 MB parquet <span class="d">│</span> 14 context fields
+<span class="a">▸</span> joined: L2 depth · r/federalreserve · bloomberg econ
+  atlanta fed gdpnow · fomc dot-plot deltas
+
+<span class="d">╰──────────────────────────────────────────────────────</span></pre>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- LOGO STRIP -->
+<div class="wrap">
+  <section class="logos">
+    <div class="inner">
+      <div class="lbl">// Ingest from</div>
+      <div class="names">
+        <span>Kalshi</span>
+        <span>Polymarket</span>
+        <span>Bloomberg</span>
+        <span>Reuters</span>
+        <span>AP</span>
+        <span>Reddit</span>
+        <span>538</span>
+        <span>NOAA</span>
+        <span>USGS</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- THESIS -->
+<div class="wrap">
+<section id="thesis" class="band">
+  <div class="band-head">
+    <div class="lbl">/ 01 · Thesis</div>
+    <h2>Prediction markets are becoming the highest signal source for event probabilities. <b>No Bloomberg exists for this asset class</b> <span class="accent">yet.</span></h2>
+  </div>
+  <div class="thesis-grid">
+    <div></div>
+    <div class="tcard">
+      <div class="n">→ 01 / context</div>
+      <h3>A new asset class. No infrastructure.</h3>
+      <p>Kalshi is CFTC regulated. Polymarket returned to US retail. Volume crossed $10B in 2025. Every major bank has a prediction market desk under research now. There is still no Bloomberg. No Refinitiv. No Koyfin. Tick data vendors do not exist.</p>
+    </div>
+    <div class="tcard">
+      <div class="n">→ 02 / moat</div>
+      <h3>History is a moat that compounds.</h3>
+      <p>A competitor who starts capturing in 2027 cannot retroactively capture what we are capturing today. Every day the archive runs, it becomes harder to replicate. This is not a feature that can be cloned. It is a position in time.</p>
+    </div>
+    <div class="tcard">
+      <div class="n">→ 03 / depth</div>
+      <h3>Prices alone are not enough.</h3>
+      <p>Backtesting event markets requires knowing what the world looked like at each timestamp. News. Reddit. Polls. Weather. Game scores. Stele archives the surrounding world in sync with every tick. Nobody else does this.</p>
+    </div>
+  </div>
+</section>
+
+<!-- COVERAGE -->
+<section id="coverage" class="band">
+  <div class="band-head">
+    <div class="lbl">/ 02 · Coverage</div>
+    <h2>Two data layers. <b>One timestamp.</b></h2>
+  </div>
+
+  <div class="cov-row">
+    <div></div>
+    <div class="cov-panel">
+      <h3>Market layer <span class="badge">live</span></h3>
+      <div class="sub-h">// 1s cadence, all contracts, no gaps</div>
+      <dl>
+        <dt>Venues</dt>
+        <dd>Kalshi, Polymarket. Manifold and Insight on roadmap.</dd>
+        <dt>Fields</dt>
+        <dd>Mid, bid/ask, L2 order book depth, trade prints, volume, open interest, resolution outcome.</dd>
+        <dt>Cadence</dt>
+        <dd>1 second for liquid contracts. 60 seconds for the long tail.</dd>
+        <dt>Coverage</dt>
+        <dd>Economics, politics, climate, crypto, sports, culture, science.</dd>
+        <dt>Format</dt>
+        <dd>Parquet, CSV, JSONL. SQL query interface in beta.</dd>
+      </dl>
+    </div>
+    <div class="cov-panel">
+      <h3>Context layer <span class="badge blue">new</span></h3>
+      <div class="sub-h">// synchronized to every market tick</div>
+      <dl>
+        <dt>News</dt>
+        <dd>Synchronized headline snapshots from Bloomberg, Reuters, AP, and topic-specific feeds.</dd>
+        <dt>Social</dt>
+        <dd>Reddit subreddit state, top comments, velocity. X/Twitter posts for flagged keywords.</dd>
+        <dt>Polling</dt>
+        <dd>538, Nate Silver, YouGov, Morning Consult, plus state-level trackers.</dd>
+        <dt>On-chain</dt>
+        <dd>ETH/BTC mempool, DEX volumes, wallet flows for crypto contracts.</dd>
+        <dt>Telemetry</dt>
+        <dd>Weather (NOAA), sports live scores, seismic (USGS), game state for esports.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="sample-wrap">
+    <div class="lbl">/ 02.1 · sample row</div>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <div class="title">cross-source join · single timestamp</div>
+      </div>
+<pre class="ascii">{
+  <span class="b">"ts"</span>: <span class="g">"2024-11-05T23:14:07Z"</span>,
+  <span class="b">"market"</span>: <span class="g">"polymarket:trump-wins-2024"</span>,
+  <span class="b">"yes"</span>: <span class="a">0.843</span>, <span class="b">"no"</span>: <span class="a">0.157</span>,
+  <span class="b">"orderbook"</span>: {
+    "bids": [[0.842, 18200], [0.841, 47510]],
+    "asks": [[0.844, 11200]]
+  },
+  <span class="b">"volume_1m"</span>: 2148530,
+  <span class="b">"context"</span>: {
+    <span class="d">"headlines"</span>: [
+      { "src": "AP",        "ts": "23:12:41Z", "txt": "Trump projected winner in PA per AP" },
+      { "src": "Bloomberg", "ts": "23:10:02Z", "txt": "Harris campaign halts call to supporters" }
+    ],
+    <span class="d">"reddit"</span>: { "r/politics": { "front_page_score": 0.91, "velocity": "+412/min" } },
+    <span class="d">"polls"</span>:  { "silver_bulletin_538": { "trump_ev": 276, "delta_1h": "+9" } }
+  }
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="technical" class="band">
+  <div class="band-head">
+    <div class="lbl">/ 03 · Technical</div>
+    <h2>The specifics <b>investors and engineers both ask.</b></h2>
+  </div>
+
+  <div class="faq-row">
+    <div></div>
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="i">Q.01</div>
+        <div>
+          <h4>How much data, today?</h4>
+          <p>2.4B market ticks across Kalshi and Polymarket since Q3 2024. 18TB of headline and social context, keyed to market timestamps. Growing at roughly 120GB per week.</p>
+        </div>
+        <div class="tag">scale</div>
+      </div>
+      <div class="faq-item">
+        <div class="i">Q.02</div>
+        <div>
+          <h4>Latency of capture.</h4>
+          <p>Liquid contracts captured at 1 second cadence. Wire-to-disk latency under 400ms Kalshi, under 900ms Polymarket. Context sampled at 15s to 5min.</p>
+        </div>
+        <div class="tag">perf</div>
+      </div>
+      <div class="faq-item">
+        <div class="i">Q.03</div>
+        <div>
+          <h4>Can I get redistributable data?</h4>
+          <p>Redistribution rights being cleared with Kalshi and Polymarket directly. Until then, access is research and internal-use only, under a standard data license. Public commercial API follows.</p>
+        </div>
+        <div class="tag">legal</div>
+      </div>
+      <div class="faq-item">
+        <div class="i">Q.04</div>
+        <div>
+          <h4>Pricing.</h4>
+          <p>Academic research: free. Individual traders: free tier plus metered query-volume pricing. Funds and institutions: custom, based on feed breadth and refresh rate.</p>
+        </div>
+        <div class="tag">price</div>
+      </div>
+      <div class="faq-item">
+        <div class="i">Q.05</div>
+        <div>
+          <h4>Why not scrape this myself?</h4>
+          <p>Because you would be starting now. We started earlier. A dataset that began eighteen months ago cannot be built by starting today, no matter how good your engineers are. The archive is a position in time, not a crawler.</p>
+        </div>
+        <div class="tag">moat</div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- END CTA -->
+<section id="access" class="endcta">
+  <div class="wrap">
+    <h2>The record nobody is keeping.<br><span class="accent">Come see what we have already captured.</span></h2>
+    <div class="cta-row">
+      <a href="mailto:hello@stele.xyz?subject=Dataset%20access" class="btn btn-primary">$ request_access →</a>
+      <a href="mailto:hello@stele.xyz" class="btn btn-ghost" id="contact">talk to the team →</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-inner">
+      <div>// stele · the archive for prediction markets</div>
+      <div>// typeset in alliance no.1 · jetbrains mono</div>
+      <div class="right">
+        <a href="#">twitter</a>
+        <a href="#">github</a>
+        <a href="mailto:hello@stele.xyz">email</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

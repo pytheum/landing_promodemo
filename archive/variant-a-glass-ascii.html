@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ephemeris / The Bloomberg Terminal for prediction markets</title>
+<!--
+  Variant A: Glassmorphism + ASCII hero dominant
+  Wordmark: Ephemeris
+  Font: Alliance No.1 with Inter fallback. To use the real Alliance No.1,
+        self-host the woff2 files and add an @font-face before Inter loads.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --ink-soft: #1a1a1a;
+    --paper: #f5f3ef;
+    --paper-warm: #efece5;
+    --glass: rgba(255, 255, 255, 0.55);
+    --glass-stroke: rgba(255, 255, 255, 0.8);
+    --rule: rgba(10, 10, 10, 0.12);
+    --accent: #0a0a0a;
+    --muted: rgba(10, 10, 10, 0.55);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Alliance No.1', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'ss01', 'cv11';
+    color: var(--ink);
+    background: var(--paper);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .bg {
+    position: fixed; inset: 0; z-index: -1; overflow: hidden;
+    background: radial-gradient(1200px 800px at 15% 10%, #e8d9ff 0%, transparent 60%),
+                radial-gradient(900px 700px at 85% 20%, #ffe5d4 0%, transparent 55%),
+                radial-gradient(1000px 900px at 50% 95%, #d4ecff 0%, transparent 60%),
+                var(--paper);
+  }
+  .bg::after {
+    content: ''; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(10,10,10,0.08) 1px, transparent 0);
+    background-size: 28px 28px;
+    opacity: 0.45;
+    mask-image: radial-gradient(ellipse at center, rgba(0,0,0,0.9), transparent 75%);
+  }
+  nav {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    z-index: 100; width: min(1240px, calc(100% - 36px));
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px;
+    background: var(--glass); backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    border: 1px solid var(--glass-stroke);
+    border-radius: 18px;
+    box-shadow: 0 8px 30px rgba(10,10,10,0.06);
+  }
+  .wordmark {
+    font-size: 18px; font-weight: 500; letter-spacing: -0.02em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .wordmark .dot {
+    width: 8px; height: 8px; background: var(--ink); border-radius: 50%;
+    animation: pulse 2.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+  }
+  nav ul { list-style: none; display: flex; gap: 28px; }
+  nav ul a {
+    color: var(--ink); text-decoration: none; font-size: 14px; font-weight: 450;
+    opacity: 0.7; transition: opacity 0.2s;
+  }
+  nav ul a:hover { opacity: 1; }
+  nav .cta {
+    padding: 9px 18px; border-radius: 10px;
+    background: var(--ink); color: var(--paper);
+    font-size: 14px; font-weight: 500; text-decoration: none;
+    transition: transform 0.15s;
+  }
+  nav .cta:hover { transform: translateY(-1px); }
+
+  .wrap {
+    max-width: 1240px; margin: 0 auto; padding: 0 24px;
+  }
+
+  /* HERO */
+  .hero {
+    padding: 180px 0 100px;
+    display: grid; grid-template-columns: 1.1fr 1fr; gap: 60px; align-items: center;
+  }
+  @media (max-width: 960px) { .hero { grid-template-columns: 1fr; padding-top: 140px; } }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 7px 14px; border-radius: 999px;
+    background: var(--glass); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-stroke);
+    font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 28px;
+  }
+  .eyebrow .spark { width: 6px; height: 6px; background: #16a34a; border-radius: 50%; }
+
+  h1 {
+    font-size: clamp(48px, 7vw, 96px);
+    font-weight: 500;
+    letter-spacing: -0.035em;
+    line-height: 0.96;
+    margin-bottom: 28px;
+  }
+  h1 em {
+    font-style: normal; font-weight: 300; opacity: 0.58;
+  }
+  .sub {
+    font-size: clamp(18px, 1.5vw, 22px);
+    font-weight: 400; line-height: 1.45; opacity: 0.75;
+    max-width: 540px; margin-bottom: 36px;
+  }
+  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 16px 24px; border-radius: 14px;
+    font-size: 15px; font-weight: 500; text-decoration: none;
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .btn-primary { background: var(--ink); color: var(--paper); box-shadow: 0 10px 30px rgba(10,10,10,0.22); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(10,10,10,0.28); }
+  .btn-ghost {
+    background: var(--glass); backdrop-filter: blur(20px); color: var(--ink);
+    border: 1px solid var(--glass-stroke);
+  }
+  .btn-ghost:hover { transform: translateY(-2px); }
+  .btn .arrow { transition: transform 0.2s; }
+  .btn:hover .arrow { transform: translate(3px, 0); }
+
+  /* ASCII terminal */
+  .terminal {
+    background: var(--glass);
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
+    border: 1px solid var(--glass-stroke);
+    border-radius: 22px;
+    padding: 22px 24px;
+    box-shadow: 0 24px 60px rgba(10,10,10,0.1),
+                inset 0 1px 0 rgba(255,255,255,0.9);
+    overflow: hidden;
+  }
+  .terminal-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--rule); margin-bottom: 16px;
+  }
+  .terminal-bar .tl { display: flex; gap: 6px; }
+  .terminal-bar .tl span { width: 10px; height: 10px; border-radius: 50%; background: rgba(10,10,10,0.15); }
+  .terminal-bar .title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--muted); margin-left: 8px; letter-spacing: 0.04em;
+  }
+  pre.ascii {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px; line-height: 1.45; color: var(--ink);
+    white-space: pre; overflow-x: auto;
+    font-weight: 400;
+  }
+  pre.ascii .dim { opacity: 0.5; }
+  pre.ascii .hi { color: #111; font-weight: 600; }
+  pre.ascii .green { color: #15803d; }
+  pre.ascii .red { color: #b91c1c; }
+
+  /* THESIS */
+  .thesis {
+    padding: 140px 0;
+    border-top: 1px solid var(--rule);
+  }
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    opacity: 0.55; margin-bottom: 40px;
+  }
+  .thesis h2 {
+    font-size: clamp(36px, 5vw, 64px);
+    font-weight: 400; letter-spacing: -0.03em; line-height: 1.02;
+    max-width: 1000px;
+  }
+  .thesis h2 em { font-style: normal; font-weight: 300; opacity: 0.5; }
+  .thesis-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+    margin-top: 80px;
+  }
+  @media (max-width: 960px) { .thesis-grid { grid-template-columns: 1fr; } }
+  .thesis-card {
+    background: var(--glass); backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-stroke);
+    border-radius: 22px; padding: 36px;
+    box-shadow: 0 12px 40px rgba(10,10,10,0.06);
+  }
+  .thesis-card .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; opacity: 0.5; margin-bottom: 22px;
+  }
+  .thesis-card h3 {
+    font-size: 26px; font-weight: 500; letter-spacing: -0.02em;
+    margin-bottom: 14px; line-height: 1.1;
+  }
+  .thesis-card p { font-size: 15px; line-height: 1.55; opacity: 0.72; }
+
+  /* COVERAGE */
+  .coverage {
+    padding: 140px 0;
+    border-top: 1px solid var(--rule);
+  }
+  .coverage-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 48px;
+    margin-top: 60px;
+  }
+  @media (max-width: 960px) { .coverage-grid { grid-template-columns: 1fr; } }
+  .coverage-panel {
+    background: var(--glass); backdrop-filter: blur(28px);
+    border: 1px solid var(--glass-stroke);
+    border-radius: 22px; padding: 40px;
+  }
+  .coverage-panel h3 {
+    font-size: 32px; font-weight: 500; letter-spacing: -0.025em;
+    margin-bottom: 22px;
+  }
+  .coverage-list { list-style: none; display: grid; gap: 14px; }
+  .coverage-list li {
+    display: grid; grid-template-columns: 120px 1fr; align-items: start; gap: 18px;
+    padding: 14px 0; border-bottom: 1px solid var(--rule); font-size: 14px;
+  }
+  .coverage-list li:last-child { border-bottom: none; }
+  .coverage-list .k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    opacity: 0.55; padding-top: 2px;
+  }
+  .coverage-list .v { line-height: 1.5; }
+
+  .sample {
+    grid-column: 1 / -1;
+    margin-top: 16px;
+  }
+
+  /* FAQ */
+  .faq { padding: 140px 0; border-top: 1px solid var(--rule); }
+  .faq h2 {
+    font-size: clamp(36px, 5vw, 64px);
+    font-weight: 400; letter-spacing: -0.03em; line-height: 1.02;
+    margin-bottom: 60px; max-width: 800px;
+  }
+  .faq-list { max-width: 900px; }
+  .faq-item {
+    border-top: 1px solid var(--rule);
+    padding: 28px 0;
+    display: grid; grid-template-columns: 60px 1fr; gap: 24px;
+  }
+  .faq-item:last-child { border-bottom: 1px solid var(--rule); }
+  .faq-item .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.1em; opacity: 0.45; padding-top: 6px;
+  }
+  .faq-item h4 {
+    font-size: 22px; font-weight: 500; letter-spacing: -0.015em; margin-bottom: 10px;
+  }
+  .faq-item p { font-size: 15px; line-height: 1.6; opacity: 0.72; max-width: 680px; }
+
+  /* CTA */
+  .endcta {
+    padding: 140px 0 200px; border-top: 1px solid var(--rule); text-align: center;
+  }
+  .endcta h2 {
+    font-size: clamp(48px, 8vw, 120px);
+    font-weight: 400; letter-spacing: -0.04em; line-height: 0.96;
+    max-width: 1100px; margin: 0 auto 40px;
+  }
+  .endcta h2 em { font-style: normal; font-weight: 300; opacity: 0.45; }
+  .endcta .cta-row { justify-content: center; }
+
+  /* FOOTER */
+  footer {
+    padding: 40px 0 60px;
+    border-top: 1px solid var(--rule);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px; opacity: 0.6; flex-wrap: wrap; gap: 12px;
+  }
+  footer .links { display: flex; gap: 24px; }
+  footer a { color: inherit; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<nav>
+  <div class="wordmark"><span class="dot"></span>ephemeris</div>
+  <ul>
+    <li><a href="#thesis">Why</a></li>
+    <li><a href="#coverage">Coverage</a></li>
+    <li><a href="#faq">Technical</a></li>
+  </ul>
+  <a href="#request" class="cta">Request access</a>
+</nav>
+
+<main class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div>
+      <div class="eyebrow"><span class="spark"></span>Live archive, 2.4B ticks captured</div>
+      <h1>The Bloomberg Terminal<br>for <em>prediction markets.</em></h1>
+      <p class="sub">Every contract on Kalshi and Polymarket, every tick, every surrounding signal. Archived in real time. Served as history, forever.</p>
+      <div class="cta-row">
+        <a href="#request" class="btn btn-primary">Request dataset access <span class="arrow">&rarr;</span></a>
+        <a href="#contact" class="btn btn-ghost">Contact</a>
+      </div>
+    </div>
+
+    <div class="terminal" aria-hidden="true">
+      <div class="terminal-bar">
+        <div class="tl"><span></span><span></span><span></span></div>
+        <div class="title">ephemeris ~ query: WILL_FED_CUT_MAY_2026</div>
+      </div>
+<pre class="ascii"><span class="dim">$</span> <span class="hi">eph query</span> --market WILL_FED_CUT_MAY_2026 \
+    --range 2026-01-01..2026-04-16 --context on
+
+<span class="dim">┌─────────────┬──────┬──────┬────────┬──────────────────────────┐</span>
+<span class="dim">│</span> timestamp   <span class="dim">│</span> yes  <span class="dim">│</span> no   <span class="dim">│</span> volume <span class="dim">│</span> context                  <span class="dim">│</span>
+<span class="dim">├─────────────┼──────┼──────┼────────┼──────────────────────────┤</span>
+<span class="dim">│</span> 01-02 14:33 <span class="dim">│</span> <span class="red">0.42</span> <span class="dim">│</span> 0.58 <span class="dim">│</span>  24100 <span class="dim">│</span> CPI 2.8% YoY             <span class="dim">│</span>
+<span class="dim">│</span> 01-15 09:15 <span class="dim">│</span> <span class="red">0.51</span> <span class="dim">│</span> 0.49 <span class="dim">│</span>  38402 <span class="dim">│</span> Powell hawkish, Econ Club <span class="dim">│</span>
+<span class="dim">│</span> 02-28 16:00 <span class="dim">│</span> <span class="green">0.63</span> <span class="dim">│</span> 0.37 <span class="dim">│</span>  67100 <span class="dim">│</span> NFP miss, 143k v 190k    <span class="dim">│</span>
+<span class="dim">│</span> 03-19 14:00 <span class="dim">│</span> <span class="green">0.72</span> <span class="dim">│</span> 0.28 <span class="dim">│</span>  89240 <span class="dim">│</span> FOMC hold, dots softened  <span class="dim">│</span>
+<span class="dim">│</span> 04-16 12:00 <span class="dim">│</span> <span class="green">0.69</span> <span class="dim">│</span> 0.31 <span class="dim">│</span>  12500 <span class="dim">│</span> &lt;live&gt;                    <span class="dim">│</span>
+<span class="dim">└─────────────┴──────┴──────┴────────┴──────────────────────────┘</span>
+
+  <span class="dim">price history (YES)                               1s cadence</span>
+  0.80 <span class="dim">┤</span>                                         <span class="green">▂▄▆</span>
+  0.70 <span class="dim">┤</span>                                 <span class="green">▁▂▄▆██████▆</span>
+  0.60 <span class="dim">┤</span>                       <span class="green">▁▂▄▆████████████████▅</span>
+  0.50 <span class="dim">┤</span>          <span class="green">▁▁▂▂▃▄▅▆▇</span>███████████████████<span class="green">▅</span>
+  0.40 <span class="dim">┤</span><span class="red">▁▁▁▂▂▃▃▄▅</span>████████████████████████████<span class="red">▃</span>
+       <span class="dim">└─────────────────────────────────────────────────</span>
+        JAN           FEB            MAR           APR
+
+<span class="dim">▸</span> 287,419 rows <span class="dim">│</span> 1.3 MB parquet <span class="dim">│</span> 14 contextual fields
+<span class="dim">▸</span> synced to orderbook depth L2, Reddit /r/federalreserve,
+  Bloomberg econ headlines, DSGE nowcast (Atl Fed GDPNow).</pre>
+    </div>
+  </section>
+
+  <!-- THESIS -->
+  <section id="thesis" class="thesis">
+    <div class="section-label">01 / Thesis</div>
+    <h2>Prediction markets are becoming the highest signal source for event probabilities.<br><em>There is no Bloomberg for this asset class yet.</em></h2>
+
+    <div class="thesis-grid">
+      <div class="thesis-card">
+        <div class="num">01</div>
+        <h3>A new asset class, no infrastructure.</h3>
+        <p>Kalshi is CFTC regulated. Polymarket returned to US retail. Volume crossed $10B in 2025. Every major bank has a prediction market desk under research now. There is still no Bloomberg, no Refinitiv, no Koyfin. Tick data vendors do not exist. Every moment that passes is lost.</p>
+      </div>
+      <div class="thesis-card">
+        <div class="num">02</div>
+        <h3>History is a moat that compounds.</h3>
+        <p>A competitor who starts capturing in 2027 cannot retroactively capture what we are capturing today. Every day the archive runs, it becomes harder to replicate. This is not a feature that can be cloned. It is a position in time.</p>
+      </div>
+      <div class="thesis-card">
+        <div class="num">03</div>
+        <h3>Prices alone are not enough.</h3>
+        <p>Backtesting strategies on prediction markets requires knowing what the world looked like at each timestamp. News headlines. Reddit sentiment. Polls. Weather. Game scores. Ephemeris archives the surrounding world in sync with every market tick. No other provider does this.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- COVERAGE -->
+  <section id="coverage" class="coverage">
+    <div class="section-label">02 / Coverage</div>
+    <h2 style="font-size: clamp(36px,5vw,64px); font-weight:400; letter-spacing:-0.03em; line-height:1.02; max-width:900px;">Two data layers. <em>One timestamp.</em></h2>
+
+    <div class="coverage-grid">
+      <div class="coverage-panel">
+        <h3>Market layer</h3>
+        <ul class="coverage-list">
+          <li><div class="k">Venues</div><div class="v">Kalshi, Polymarket. Manifold and Insight on roadmap.</div></li>
+          <li><div class="k">Fields</div><div class="v">Mid, bid/ask, L2 order book depth, trade prints, volume, open interest, resolution outcome.</div></li>
+          <li><div class="k">Cadence</div><div class="v">1 second for liquid contracts. 60 seconds for the long tail. All contracts, no gaps.</div></li>
+          <li><div class="k">Coverage</div><div class="v">Economics, politics, climate, crypto, sports, culture, science. Every active contract captured.</div></li>
+          <li><div class="k">Format</div><div class="v">Parquet, CSV, JSONL. SQL query interface in beta.</div></li>
+        </ul>
+      </div>
+      <div class="coverage-panel">
+        <h3>Context layer</h3>
+        <ul class="coverage-list">
+          <li><div class="k">News</div><div class="v">Synchronized headline snapshots from Bloomberg, Reuters, AP, and topic-specific feeds at every tick.</div></li>
+          <li><div class="k">Social</div><div class="v">Reddit subreddit state, top comments, velocity. X/Twitter posts for flagged keywords.</div></li>
+          <li><div class="k">Polling</div><div class="v">538, Nate Silver, YouGov, Morning Consult, plus state-level trackers for electoral markets.</div></li>
+          <li><div class="k">On-chain</div><div class="v">ETH/BTC mempool, DEX volumes, wallet flows for crypto-adjacent contracts.</div></li>
+          <li><div class="k">Telemetry</div><div class="v">Weather (NOAA), sports live scores, seismic (USGS), game state for esports markets.</div></li>
+        </ul>
+      </div>
+
+      <div class="sample terminal">
+        <div class="terminal-bar">
+          <div class="tl"><span></span><span></span><span></span></div>
+          <div class="title">sample ~ cross-source join, single row</div>
+        </div>
+<pre class="ascii">{
+  <span class="hi">"ts"</span>: "2024-11-05T23:14:07Z",
+  <span class="hi">"market"</span>: "polymarket:trump-wins-2024",
+  <span class="hi">"yes"</span>: 0.843, <span class="hi">"no"</span>: 0.157,
+  <span class="hi">"orderbook"</span>: { "bids": [[0.842, 18200], [0.841, 47510]], "asks": [[0.844, 11200]] },
+  <span class="hi">"volume_1m"</span>: 2148530,
+  <span class="hi">"context"</span>: {
+    "headlines": [
+      { "src": "AP",        "ts": "23:12:41Z", "txt": "Trump projected winner in PA per AP" },
+      { "src": "Bloomberg", "ts": "23:10:02Z", "txt": "Harris campaign halts call to supporters" }
+    ],
+    "reddit": { "r/politics": { "front_page_score": 0.91, "velocity": "+412/min" } },
+    "polls":  { "silver_bulletin_538": { "trump_ev": 276, "delta_1h": "+9" } }
+  }
+}</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="faq">
+    <div class="section-label">03 / Technical</div>
+    <h2>The details <em>investors and engineers both ask.</em></h2>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="n">01</div>
+        <div>
+          <h4>How much data, today?</h4>
+          <p>2.4B market ticks across Kalshi and Polymarket since Q3 2024. 18TB of headline and social context, keyed to market timestamps. Growing at roughly 120GB per week.</p>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="n">02</div>
+        <div>
+          <h4>Latency of capture.</h4>
+          <p>Liquid contracts captured at 1 second cadence from both venues. Wire-to-disk latency under 400ms for Kalshi, under 900ms for Polymarket. Context layer sampled at 15 seconds to 5 minutes depending on source.</p>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="n">03</div>
+        <div>
+          <h4>Can I get redistributable data?</h4>
+          <p>We are clearing redistribution rights directly with Kalshi and Polymarket. Until then, access is research and internal-use only, under a standard data license. A public API for commercial use follows once the rights are in place.</p>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="n">04</div>
+        <div>
+          <h4>Pricing.</h4>
+          <p>Academic research: free. Individual traders: free tier plus metered query-volume pricing. Funds and institutions: custom, based on feed breadth and refresh rate. We will quote specifics on request.</p>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="n">05</div>
+        <div>
+          <h4>Why not just scrape this myself?</h4>
+          <p>Because you would be starting now. We started earlier. A dataset that began eighteen months ago cannot be built by starting today, no matter how good your engineers are. The archive is a position in time, not a crawler.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- END CTA -->
+  <section id="request" class="endcta">
+    <div class="section-label" style="text-align:center;">04 / Next</div>
+    <h2>The record nobody is keeping.<br><em>Come see what we have already captured.</em></h2>
+    <div class="cta-row">
+      <a href="mailto:hello@ephemeris.xyz?subject=Dataset%20access%20request" class="btn btn-primary">Request dataset access <span class="arrow">&rarr;</span></a>
+      <a href="mailto:hello@ephemeris.xyz" class="btn btn-ghost" id="contact">Contact the team</a>
+    </div>
+  </section>
+
+  <footer>
+    <div>&copy; 2026 Ephemeris. The archive for prediction markets.</div>
+    <div class="links">
+      <a href="#">Twitter</a>
+      <a href="#">GitHub</a>
+      <a href="mailto:hello@ephemeris.xyz">Email</a>
+    </div>
+  </footer>
+</main>
+
+</body>
+</html>

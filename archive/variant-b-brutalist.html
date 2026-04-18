@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STELE / Bloomberg Terminal for prediction markets</title>
+<!--
+  Variant B: Brutalist / neobrutalist
+  Wordmark: STELE
+  Font: Alliance No.1 with Inter fallback, plus JetBrains Mono for ASCII and data.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #000;
+    --paper: #efeae0;
+    --hot: #ff4d1f;
+    --lime: #cef045;
+    --cream: #f7f3e8;
+    --stroke: 3px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Alliance No.1', 'Inter', -apple-system, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    font-weight: 500;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--hot); color: var(--paper); }
+
+  /* Ticker bar */
+  .ticker {
+    background: var(--ink); color: var(--paper);
+    padding: 8px 0; overflow: hidden; white-space: nowrap;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.05em;
+    border-bottom: var(--stroke) solid var(--ink);
+  }
+  .ticker-track { display: inline-block; padding-left: 100%; animation: tick 60s linear infinite; }
+  .ticker span { margin: 0 24px; }
+  .ticker .up { color: var(--lime); }
+  .ticker .down { color: var(--hot); }
+  @keyframes tick { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+
+  /* NAV */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: stretch; justify-content: space-between;
+    background: var(--paper);
+    border-bottom: var(--stroke) solid var(--ink);
+  }
+  .wordmark {
+    padding: 18px 24px;
+    border-right: var(--stroke) solid var(--ink);
+    font-size: 28px; font-weight: 900; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .wordmark::after { content: '▣'; font-size: 22px; }
+  nav ul { list-style: none; display: flex; }
+  nav ul li a {
+    display: block; padding: 18px 22px;
+    color: var(--ink); text-decoration: none; font-weight: 600;
+    border-right: var(--stroke) solid var(--ink);
+    font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em;
+    transition: background 0.15s, color 0.15s;
+  }
+  nav ul li a:hover { background: var(--ink); color: var(--paper); }
+  nav .cta {
+    background: var(--hot); color: var(--paper);
+    padding: 18px 28px; text-decoration: none; font-weight: 900; letter-spacing: 0.05em;
+    text-transform: uppercase; font-size: 14px;
+    border-left: var(--stroke) solid var(--ink);
+    display: flex; align-items: center; gap: 10px;
+  }
+  nav .cta:hover { background: var(--ink); }
+
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
+
+  /* HERO */
+  .hero {
+    border-bottom: var(--stroke) solid var(--ink);
+    padding: 60px 0 80px;
+    background-image:
+      repeating-linear-gradient(0deg, transparent 0 40px, rgba(0,0,0,0.04) 40px 41px),
+      repeating-linear-gradient(90deg, transparent 0 40px, rgba(0,0,0,0.04) 40px 41px);
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; padding: 12px 0 24px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    border-bottom: 2px dashed var(--ink); margin-bottom: 40px;
+  }
+  h1 {
+    font-size: clamp(64px, 10vw, 160px);
+    font-weight: 900; line-height: 0.88; letter-spacing: -0.04em;
+    text-transform: uppercase;
+    margin-bottom: 28px;
+  }
+  h1 .slash { color: var(--hot); display: inline-block; transform: translateY(-4px); }
+  h1 .highlight {
+    background: var(--lime); padding: 0 12px; display: inline-block;
+    box-shadow: 8px 8px 0 var(--ink);
+  }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 60px;
+    margin-top: 40px; padding-top: 40px;
+    border-top: var(--stroke) solid var(--ink);
+  }
+  @media (max-width: 900px) { .hero-sub { grid-template-columns: 1fr; } }
+  .hero-sub .lede {
+    font-size: clamp(22px, 2vw, 28px); font-weight: 600; line-height: 1.2;
+    letter-spacing: -0.015em;
+  }
+  .hero-sub .lede b { background: var(--ink); color: var(--paper); padding: 0 6px; }
+  .hero-cta { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 18px 28px; font-weight: 900;
+    font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase;
+    text-decoration: none; color: var(--ink);
+    border: var(--stroke) solid var(--ink);
+    background: var(--paper);
+    box-shadow: 8px 8px 0 var(--ink);
+    transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .btn:hover { transform: translate(-3px, -3px); box-shadow: 11px 11px 0 var(--ink); }
+  .btn:active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--ink); }
+  .btn-hot { background: var(--hot); color: var(--paper); }
+  .btn-lime { background: var(--lime); }
+
+  /* ASCII block */
+  .ascii-block {
+    margin-top: 60px; padding: 28px;
+    background: var(--ink); color: var(--lime);
+    border: var(--stroke) solid var(--ink);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.45;
+    overflow-x: auto;
+    box-shadow: 12px 12px 0 var(--hot);
+  }
+  .ascii-block pre { white-space: pre; }
+  .ascii-block .y { color: var(--lime); }
+  .ascii-block .h { color: var(--hot); }
+  .ascii-block .w { color: var(--paper); }
+  .ascii-block .d { opacity: 0.5; }
+
+  /* SECTION HEADERS */
+  .section-header {
+    border-bottom: var(--stroke) solid var(--ink);
+    padding: 40px 0 20px;
+    display: grid; grid-template-columns: 200px 1fr auto; gap: 40px; align-items: baseline;
+  }
+  .section-header .label {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+  }
+  .section-header h2 {
+    font-size: clamp(40px, 5.5vw, 72px); font-weight: 900;
+    line-height: 0.95; letter-spacing: -0.03em; text-transform: uppercase;
+  }
+  .section-header .meta {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; opacity: 0.55;
+  }
+  @media (max-width: 900px) { .section-header { grid-template-columns: 1fr; } }
+
+  /* THESIS */
+  .thesis { border-bottom: var(--stroke) solid var(--ink); padding-bottom: 80px; }
+  .thesis-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    margin-top: 60px;
+    border-top: var(--stroke) solid var(--ink);
+    border-left: var(--stroke) solid var(--ink);
+  }
+  @media (max-width: 900px) { .thesis-grid { grid-template-columns: 1fr; } }
+  .tcard {
+    padding: 36px 32px;
+    border-right: var(--stroke) solid var(--ink);
+    border-bottom: var(--stroke) solid var(--ink);
+    background: var(--cream); position: relative; min-height: 340px;
+  }
+  .tcard:nth-child(2) { background: var(--lime); }
+  .tcard:nth-child(3) { background: var(--hot); color: var(--paper); }
+  .tcard .num {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.2em; margin-bottom: 20px;
+  }
+  .tcard h3 {
+    font-size: 28px; font-weight: 900; line-height: 1.0; letter-spacing: -0.015em;
+    text-transform: uppercase; margin-bottom: 16px;
+  }
+  .tcard p { font-size: 15px; line-height: 1.5; font-weight: 500; }
+
+  /* COVERAGE */
+  .coverage { border-bottom: var(--stroke) solid var(--ink); padding-bottom: 0; }
+  .cov-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    border-top: var(--stroke) solid var(--ink);
+  }
+  @media (max-width: 900px) { .cov-grid { grid-template-columns: 1fr; } }
+  .cov-panel {
+    padding: 48px 40px;
+    border-right: var(--stroke) solid var(--ink);
+  }
+  .cov-panel:last-child { border-right: none; }
+  .cov-panel h3 {
+    font-size: 40px; font-weight: 900; text-transform: uppercase;
+    letter-spacing: -0.02em; line-height: 0.9; margin-bottom: 32px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .cov-panel h3 .tag {
+    background: var(--ink); color: var(--paper); font-size: 11px;
+    padding: 4px 10px; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.15em; font-weight: 700;
+  }
+  .cov-panel dl { display: grid; gap: 0; }
+  .cov-panel dt {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase;
+    padding: 14px 0 4px; border-top: 2px dotted var(--ink);
+  }
+  .cov-panel dt:first-child { border-top: none; padding-top: 0; }
+  .cov-panel dd { font-size: 15px; line-height: 1.5; padding-bottom: 14px; font-weight: 500; }
+
+  .sample-strip {
+    border-top: var(--stroke) solid var(--ink);
+    background: var(--ink); color: var(--lime);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55;
+    padding: 40px; overflow-x: auto;
+  }
+  .sample-strip pre { white-space: pre; }
+  .sample-strip .k { color: var(--hot); }
+  .sample-strip .v { color: var(--paper); }
+  .sample-strip .d { opacity: 0.5; }
+
+  /* FAQ */
+  .faq { border-bottom: var(--stroke) solid var(--ink); padding-bottom: 80px; }
+  .faq-list { margin-top: 60px; }
+  .faq-item {
+    display: grid; grid-template-columns: 100px 1fr auto;
+    gap: 40px; padding: 28px 0;
+    border-top: var(--stroke) solid var(--ink);
+    align-items: start;
+  }
+  .faq-item:last-child { border-bottom: var(--stroke) solid var(--ink); }
+  .faq-item .n {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 14px; letter-spacing: 0.15em;
+  }
+  .faq-item h4 {
+    font-size: 24px; font-weight: 900; letter-spacing: -0.015em;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .faq-item p { font-size: 15px; line-height: 1.55; max-width: 760px; font-weight: 500; }
+  .faq-item .tag {
+    background: var(--lime); padding: 4px 10px; font-size: 10px; font-weight: 900;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.15em;
+    border: 2px solid var(--ink);
+  }
+  @media (max-width: 900px) { .faq-item { grid-template-columns: 1fr; } }
+
+  /* END CTA */
+  .endcta {
+    background: var(--ink); color: var(--paper);
+    padding: 120px 0 140px; text-align: center;
+    border-bottom: var(--stroke) solid var(--ink);
+  }
+  .endcta h2 {
+    font-size: clamp(56px, 10vw, 180px); font-weight: 900;
+    letter-spacing: -0.04em; line-height: 0.88;
+    text-transform: uppercase; max-width: 1100px; margin: 0 auto 40px;
+  }
+  .endcta h2 .slash { color: var(--hot); }
+  .endcta .btn { box-shadow: 8px 8px 0 var(--hot); background: var(--paper); color: var(--ink); border-color: var(--paper); }
+  .endcta .btn:hover { background: var(--lime); }
+  .endcta .btn-hot { background: var(--hot); color: var(--paper); border-color: var(--paper); box-shadow: 8px 8px 0 var(--lime); }
+  .endcta .ctas { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+
+  footer {
+    background: var(--paper); padding: 40px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    flex-wrap: wrap; gap: 16px;
+  }
+  footer .links { display: flex; gap: 24px; }
+  footer a { color: inherit; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+
+<div class="ticker">
+  <div class="ticker-track">
+    <span>STELE::LIVE</span>
+    <span class="up">▲ FED-CUT-MAY-26  0.69</span>
+    <span class="down">▼ TRUMP-APPROVAL-APR  0.42</span>
+    <span class="up">▲ BTC-100K-EOY  0.58</span>
+    <span class="up">▲ OSCAR-BEST-PIC  0.31</span>
+    <span class="down">▼ UKRAINE-DEAL-24M  0.22</span>
+    <span>CAPTURE::ONLINE</span>
+    <span>2,410,382,917 ticks archived</span>
+    <span class="up">▲ FED-CUT-MAY-26  0.69</span>
+    <span class="down">▼ NYC-MAYOR-DEM  0.47</span>
+    <span>STELE::LIVE</span>
+    <span class="up">▲ SCOTUS-OVERTURN  0.12</span>
+  </div>
+</div>
+
+<nav>
+  <div class="wordmark">STELE</div>
+  <ul>
+    <li><a href="#thesis">01 Thesis</a></li>
+    <li><a href="#coverage">02 Coverage</a></li>
+    <li><a href="#faq">03 Technical</a></li>
+  </ul>
+  <a href="#request" class="cta">Request Access →</a>
+</nav>
+
+<main class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-meta">
+      <span>FILE::001 / HERO.BRUT</span>
+      <span>VERSION 0.1 / 2026-04-16</span>
+      <span>STATUS: PRE-RELEASE</span>
+    </div>
+
+    <h1>
+      BLOOMBERG<br>
+      TERMINAL<span class="slash">/</span><br>
+      <span class="highlight">FOR PREDICTION</span><br>
+      MARKETS.
+    </h1>
+
+    <div class="hero-sub">
+      <div class="lede">
+        Every <b>contract</b> on Kalshi and Polymarket, every tick, every surrounding signal.<br>
+        Archived in real time. Served as history, forever.
+      </div>
+      <div class="hero-cta">
+        <a href="#request" class="btn btn-hot">Request Dataset Access →</a>
+        <a href="#contact" class="btn btn-lime">Talk to the Team →</a>
+      </div>
+    </div>
+
+    <div class="ascii-block" aria-hidden="true">
+<pre><span class="d">┌─ STELE TERMINAL ─────────────────────────────────────────────────┐</span>
+<span class="w">$</span> <span class="y">stele query</span> <span class="h">WILL_FED_CUT_MAY_2026</span> <span class="w">--range</span> 2026-01-01..2026-04-16 <span class="w">--ctx</span>
+
+<span class="d">┌─────────────┬──────┬──────┬────────┬──────────────────────────┐</span>
+<span class="d">│</span> <span class="h">TIMESTAMP</span>   <span class="d">│</span> <span class="h">YES</span>  <span class="d">│</span> <span class="h">NO</span>   <span class="d">│</span> <span class="h">VOLUME</span> <span class="d">│</span> <span class="h">CONTEXT</span>                  <span class="d">│</span>
+<span class="d">├─────────────┼──────┼──────┼────────┼──────────────────────────┤</span>
+<span class="d">│</span> 01-02 14:33 <span class="d">│</span> 0.42 <span class="d">│</span> 0.58 <span class="d">│</span>  24100 <span class="d">│</span> CPI 2.8% YoY             <span class="d">│</span>
+<span class="d">│</span> 01-15 09:15 <span class="d">│</span> 0.51 <span class="d">│</span> 0.49 <span class="d">│</span>  38402 <span class="d">│</span> Powell hawkish, Econ Club <span class="d">│</span>
+<span class="d">│</span> 02-28 16:00 <span class="d">│</span> 0.63 <span class="d">│</span> 0.37 <span class="d">│</span>  67100 <span class="d">│</span> NFP miss, 143k v 190k    <span class="d">│</span>
+<span class="d">│</span> 03-19 14:00 <span class="d">│</span> <span class="y">0.72</span> <span class="d">│</span> 0.28 <span class="d">│</span>  89240 <span class="d">│</span> FOMC hold, dots softened  <span class="d">│</span>
+<span class="d">│</span> 04-16 12:00 <span class="d">│</span> <span class="y">0.69</span> <span class="d">│</span> 0.31 <span class="d">│</span>  12500 <span class="d">│</span> <span class="h">&lt;LIVE&gt;</span>                    <span class="d">│</span>
+<span class="d">└─────────────┴──────┴──────┴────────┴──────────────────────────┘</span>
+
+  <span class="d">PRICE HISTORY (YES)                                 1s cadence</span>
+  0.80 <span class="d">┤</span>                                         <span class="y">▂▄▆</span>
+  0.70 <span class="d">┤</span>                                 <span class="y">▁▂▄▆██████▆</span>
+  0.60 <span class="d">┤</span>                       <span class="y">▁▂▄▆████████████████▅</span>
+  0.50 <span class="d">┤</span>          <span class="y">▁▁▂▂▃▄▅▆▇</span>███████████████████<span class="y">▅</span>
+  0.40 <span class="d">┤</span><span class="h">▁▁▁▂▂▃▃▄▅</span>████████████████████████████<span class="h">▃</span>
+       <span class="d">└─────────────────────────────────────────────────</span>
+        JAN           FEB            MAR           APR
+
+<span class="d">▸</span> 287,419 rows <span class="d">│</span> 1.3 MB parquet <span class="d">│</span> 14 contextual fields
+<span class="d">▸</span> orderbook depth L2, Reddit r/federalreserve, Bloomberg econ,
+<span class="d">▸</span> DSGE nowcast (Atlanta Fed GDPNow), dot-plot deltas.
+<span class="d">└──────────────────────────────────────────────────────────────────┘</span></pre>
+    </div>
+  </section>
+
+  <!-- THESIS -->
+  <section id="thesis" class="thesis">
+    <div class="section-header">
+      <div class="label">&gt; 01 / THESIS</div>
+      <h2>Why this data,<br>and why now.</h2>
+      <div class="meta">3 POINTS / 220 WORDS</div>
+    </div>
+
+    <div class="thesis-grid">
+      <div class="tcard">
+        <div class="num">&gt; 01 / CONTEXT</div>
+        <h3>A new asset class.<br>No infrastructure.</h3>
+        <p>Kalshi is CFTC regulated. Polymarket is back in the US. Volume crossed $10B in 2025. Every major bank has a prediction market desk under research now. There is still no Bloomberg. No Refinitiv. No Koyfin. Tick data vendors do not exist.</p>
+      </div>
+      <div class="tcard">
+        <div class="num">&gt; 02 / MOAT</div>
+        <h3>History is a moat<br>that compounds.</h3>
+        <p>A competitor who starts capturing in 2027 cannot retroactively capture what we are capturing today. Every day the archive runs, it becomes harder to replicate. This is not a feature that can be cloned. It is a position in time.</p>
+      </div>
+      <div class="tcard">
+        <div class="num">&gt; 03 / DEPTH</div>
+        <h3>Prices alone<br>are not enough.</h3>
+        <p>Backtesting strategies on event markets requires knowing what the world looked like at each timestamp. News. Reddit. Polls. Weather. Game scores. Stele archives the surrounding world in sync with every market tick. Nobody else does this.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- COVERAGE -->
+  <section id="coverage" class="coverage">
+    <div class="section-header">
+      <div class="label">&gt; 02 / COVERAGE</div>
+      <h2>Two data layers.<br>One timestamp.</h2>
+      <div class="meta">CAPTURE ACTIVE / 1s CADENCE</div>
+    </div>
+
+    <div class="cov-grid">
+      <div class="cov-panel">
+        <h3>MARKET LAYER <span class="tag">LIVE</span></h3>
+        <dl>
+          <dt>&gt; Venues</dt>
+          <dd>Kalshi, Polymarket. Manifold and Insight on the roadmap.</dd>
+          <dt>&gt; Fields</dt>
+          <dd>Mid, bid/ask, L2 order book depth, trade prints, volume, open interest, resolution outcome.</dd>
+          <dt>&gt; Cadence</dt>
+          <dd>1 second for liquid contracts. 60 seconds for the long tail. All contracts, no gaps.</dd>
+          <dt>&gt; Coverage</dt>
+          <dd>Economics, politics, climate, crypto, sports, culture, science. Every active contract captured.</dd>
+          <dt>&gt; Format</dt>
+          <dd>Parquet, CSV, JSONL. SQL query interface in beta.</dd>
+        </dl>
+      </div>
+      <div class="cov-panel" style="background: var(--lime);">
+        <h3>CONTEXT LAYER <span class="tag" style="background: var(--ink); color: var(--lime);">NEW</span></h3>
+        <dl>
+          <dt>&gt; News</dt>
+          <dd>Synchronized headline snapshots from Bloomberg, Reuters, AP, and topic-specific feeds at every tick.</dd>
+          <dt>&gt; Social</dt>
+          <dd>Reddit subreddit state, top comments, velocity. X/Twitter posts for flagged keywords.</dd>
+          <dt>&gt; Polling</dt>
+          <dd>538, Nate Silver, YouGov, Morning Consult, plus state-level trackers for electoral markets.</dd>
+          <dt>&gt; On-chain</dt>
+          <dd>ETH/BTC mempool, DEX volumes, wallet flows for crypto-adjacent contracts.</dd>
+          <dt>&gt; Telemetry</dt>
+          <dd>Weather (NOAA), sports live scores, seismic (USGS), game state for esports markets.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="sample-strip" aria-hidden="true">
+<pre>// sample row. cross-source join. single timestamp.
+<span class="k">ts</span>        = <span class="v">"2024-11-05T23:14:07Z"</span>
+<span class="k">market</span>    = <span class="v">"polymarket:trump-wins-2024"</span>
+<span class="k">yes</span>       = <span class="v">0.843</span>                    <span class="d">// no = 0.157</span>
+<span class="k">orderbook</span> = <span class="v">{ bids: [[0.842, 18200], [0.841, 47510]],</span>
+              <span class="v">  asks: [[0.844, 11200]] }</span>
+<span class="k">vol_1m</span>    = <span class="v">2,148,530</span>
+<span class="k">headlines</span> = <span class="v">[</span>
+              <span class="v">  { "src":"AP",        "txt":"Trump projected winner in PA per AP",   "dt":"23:12:41Z" },</span>
+              <span class="v">  { "src":"Bloomberg", "txt":"Harris campaign halts call to supporters","dt":"23:10:02Z" }</span>
+              <span class="v">]</span>
+<span class="k">reddit</span>    = <span class="v">{ "r/politics": { "front_page_score": 0.91, "velocity": "+412/min" } }</span>
+<span class="k">polls</span>     = <span class="v">{ "silver_bulletin_538": { "trump_ev": 276, "delta_1h": "+9" } }</span></pre>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="faq">
+    <div class="section-header">
+      <div class="label">&gt; 03 / TECHNICAL</div>
+      <h2>The specifics<br>investors ask.</h2>
+      <div class="meta">5 QUESTIONS</div>
+    </div>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="n">Q.01</div>
+        <div>
+          <h4>How much data, today?</h4>
+          <p>2.4B market ticks across Kalshi and Polymarket since Q3 2024. 18TB of headline and social context, keyed to market timestamps. Growing at roughly 120GB per week.</p>
+        </div>
+        <div class="tag">SCALE</div>
+      </div>
+      <div class="faq-item">
+        <div class="n">Q.02</div>
+        <div>
+          <h4>Latency of capture.</h4>
+          <p>Liquid contracts captured at 1 second cadence. Wire-to-disk latency under 400ms for Kalshi, under 900ms for Polymarket. Context layer sampled at 15 seconds to 5 minutes depending on source.</p>
+        </div>
+        <div class="tag">PERF</div>
+      </div>
+      <div class="faq-item">
+        <div class="n">Q.03</div>
+        <div>
+          <h4>Can I get redistributable data?</h4>
+          <p>Redistribution rights being cleared with Kalshi and Polymarket. Until then, access is research and internal-use only, under a standard data license. Public commercial API follows once rights are in place.</p>
+        </div>
+        <div class="tag">LEGAL</div>
+      </div>
+      <div class="faq-item">
+        <div class="n">Q.04</div>
+        <div>
+          <h4>Pricing.</h4>
+          <p>Academic research: free. Individual traders: free tier plus metered query-volume pricing. Funds and institutions: custom, based on feed breadth and refresh rate. Quoted on request.</p>
+        </div>
+        <div class="tag">PRICE</div>
+      </div>
+      <div class="faq-item">
+        <div class="n">Q.05</div>
+        <div>
+          <h4>Why not scrape this myself?</h4>
+          <p>Because you would be starting now. We started earlier. A dataset that began eighteen months ago cannot be built by starting today, no matter how good your engineers are. The archive is a position in time, not a crawler.</p>
+        </div>
+        <div class="tag">MOAT</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- END CTA -->
+  <section id="request" class="endcta">
+    <h2>THE RECORD<span class="slash">/</span> NOBODY<br>IS KEEPING.</h2>
+    <div class="ctas">
+      <a href="mailto:hello@stele.xyz?subject=Dataset%20access" class="btn btn-hot">Request Dataset Access →</a>
+      <a href="mailto:hello@stele.xyz" class="btn" id="contact">Talk to the Team →</a>
+    </div>
+  </section>
+
+  <footer>
+    <div>&copy; 2026 STELE / The archive for prediction markets.</div>
+    <div class="links">
+      <a href="#">TWITTER</a>
+      <a href="#">GITHUB</a>
+      <a href="mailto:hello@stele.xyz">EMAIL</a>
+    </div>
+  </footer>
+</main>
+
+</body>
+</html>

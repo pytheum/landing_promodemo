@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Landing page variants / SnapState / Ephemeris / Stele</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Alliance No.1', 'Inter', -apple-system, sans-serif;
+    background: #f5f3ef;
+    color: #0a0a0a;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    padding: 80px 32px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header {
+    margin-bottom: 60px;
+    padding-bottom: 40px;
+    border-bottom: 1px solid rgba(0,0,0,0.15);
+  }
+  .lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    opacity: 0.55; margin-bottom: 20px;
+  }
+  h1 {
+    font-size: clamp(40px, 5vw, 72px);
+    font-weight: 400; letter-spacing: -0.03em; line-height: 1.0;
+    margin-bottom: 20px;
+  }
+  h1 b { font-weight: 600; }
+  .intro {
+    font-size: 17px; line-height: 1.55; max-width: 760px; opacity: 0.75;
+  }
+  .grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px;
+  }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: rgba(255,255,255,0.5);
+    border: 1px solid rgba(255,255,255,0.8);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    padding: 28px;
+    text-decoration: none; color: inherit;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 18px 50px rgba(0,0,0,0.1); }
+  .card .vtag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    opacity: 0.5;
+    display: flex; justify-content: space-between;
+  }
+  .card h2 {
+    font-size: 28px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.05;
+  }
+  .card h2 .wm {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; letter-spacing: 0.12em;
+    padding: 3px 8px; border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 6px; margin-left: 8px;
+    font-weight: 500; vertical-align: middle;
+  }
+  .card p { font-size: 14px; line-height: 1.5; opacity: 0.72; }
+  .card .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; opacity: 0.5;
+    display: flex; gap: 16px; flex-wrap: wrap;
+    padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.08);
+  }
+  .card .open {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 500;
+    margin-top: auto;
+  }
+  .card .open::after {
+    content: ' →'; transition: margin 0.2s;
+  }
+  .card:hover .open::after { margin-left: 6px; }
+
+  .card.dark {
+    background: #0a0a0b; color: #f4f4f5;
+    border-color: rgba(244,244,245,0.1);
+  }
+  .card.dark .vtag, .card.dark p { opacity: 0.7; }
+  .card.dark .meta { border-top-color: rgba(244,244,245,0.1); }
+  .card.dark h2 .wm { border-color: rgba(244,244,245,0.2); color: #7fc8ff; }
+
+  .card.brut {
+    background: #efeae0;
+    border: 3px solid #000;
+    box-shadow: 8px 8px 0 #000;
+    border-radius: 0;
+  }
+  .card.brut:hover { transform: translate(-3px,-3px); box-shadow: 11px 11px 0 #000; }
+  .card.brut h2 { text-transform: uppercase; font-weight: 900; }
+  .card.brut h2 .wm { border: 2px solid #000; background: #cef045; }
+
+  .card.swiss {
+    background: #fff;
+    border: 1px solid #111;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .card.swiss:hover { transform: translateY(-2px); box-shadow: 0 8px 0 -1px #111; }
+
+  footer {
+    margin-top: 80px; padding-top: 40px;
+    border-top: 1px solid rgba(0,0,0,0.15);
+    font-size: 13px; opacity: 0.6; line-height: 1.6;
+  }
+  footer b { font-weight: 600; }
+  .notes {
+    margin-top: 40px; padding: 24px;
+    background: rgba(255,255,255,0.4);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 14px;
+    font-size: 14px; line-height: 1.6;
+  }
+  .notes h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .notes ul { list-style: none; }
+  .notes li { padding: 6px 0; border-top: 1px dashed rgba(0,0,0,0.1); }
+  .notes li:first-child { border-top: none; }
+  .notes code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="lbl">// Landing page variants / 2026-04-16</div>
+    <h1>Swiss + glass, <b>three tones.</b></h1>
+    <p class="intro">
+      Variant C (Swiss / International Typographic) is the core. Glassmorphism from variant A is layered on top, applied to the floating navbar, sample terminal card, hero status pill, and end-CTA halo. Same structure, same copy, three different moods: <b>light</b>, <b>cream</b>, and <b>dark</b>. The four original exploration variants are still below for reference.
+    </p>
+  </header>
+
+  <div class="lbl" style="margin-top: 10px; margin-bottom: 18px;">// Refined / Swiss core + glass accents</div>
+
+  <div class="grid">
+
+    <a href="swiss-glass-light.html" class="card">
+      <div class="vtag"><span>Swiss-Glass / Light</span><span>Ephemeris</span></div>
+      <h2>Light on warm paper <span class="wm">v1</span></h2>
+      <p>Swiss grid, 300 weight display, JetBrains Mono eyebrow labels. Glass navbar floats above a warm off-white page with soft blue/peach/mint radial washes behind it, so the blur actually has something to pick up. Glass sample JSON card mid-page, glass halo behind the final CTA.</p>
+      <div class="meta">
+        <span>12-col grid</span>
+        <span>glass navbar</span>
+        <span>warm light</span>
+        <span>ephemeris</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+
+    <a href="swiss-glass-cream.html" class="card">
+      <div class="vtag"><span>Swiss-Glass / Cream</span><span>Ephemeris</span></div>
+      <h2>Cream on tan paper <span class="wm">v1</span></h2>
+      <p>Same structure, warmer and more paper-like. Deep tan background with peach, beige, and warm tan radial washes. Reads as archival, print-first, closer to a quiet financial journal than a SaaS page. The softest of the three, best if you want the page to feel like a document.</p>
+      <div class="meta">
+        <span>12-col grid</span>
+        <span>glass navbar</span>
+        <span>tan paper</span>
+        <span>ephemeris</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+
+    <a href="swiss-glass-dark.html" class="card dark">
+      <div class="vtag"><span>Swiss-Glass / Dark</span><span>Stele</span></div>
+      <h2>Dark with cyan + green <span class="wm">v1</span></h2>
+      <p>Full dark inversion. Near-black paper, subtle grid overlay, cyan (#7fc8ff) accent on key phrases and eyebrow numerals, green pips with glow on live indicators. Glass on dark reads as infrastructure-grade. STELE wordmark. Monospace CTAs ($ request_access). The Palantir vibe, cleaned up.</p>
+      <div class="meta">
+        <span>dark theme</span>
+        <span>cyan + green</span>
+        <span>grid overlay</span>
+        <span>stele</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+  </div>
+
+  <div class="lbl" style="margin-top: 60px; margin-bottom: 18px;">// Reference / Original four exploration variants</div>
+
+  <div class="grid">
+
+    <a href="variant-a-glass-ascii.html" class="card">
+      <div class="vtag"><span>Variant A</span><span>Ephemeris</span></div>
+      <h2>Glass + ASCII hero <span class="wm">light</span></h2>
+      <p>Warm off-white paper, soft radial gradients, frosted glass cards with backdrop-blur. Large terminal panel in the hero with the live query output. Reads refined, modern, premium. The safest variant for investor meetings where the audience skews non-technical.</p>
+      <div class="meta">
+        <span>glassmorphism</span>
+        <span>warm light</span>
+        <span>ascii hero</span>
+        <span>alliance no.1</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+
+    <a href="variant-b-brutalist.html" class="card brut">
+      <div class="vtag"><span>Variant B</span><span>Stele</span></div>
+      <h2>Brutalist / Neobrutalist <span class="wm">paper</span></h2>
+      <p>Thick black rules, 8px hard shadows, hot orange + lime accents, grid background, live ticker banner, punchy all-caps display. Highest visual impact, most "we are a startup with a point of view." Best for differentiation in a stack of deck screenshots.</p>
+      <div class="meta">
+        <span>thick rules</span>
+        <span>hard shadows</span>
+        <span>lime + hot orange</span>
+        <span>ticker bar</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+
+    <a href="variant-c-swiss.html" class="card swiss">
+      <div class="vtag"><span>Variant C</span><span>Ephemeris</span></div>
+      <h2>International Typographic <span class="wm">grid</span></h2>
+      <p>Strict 12 column grid, section labels in mono caps (01 / 02 / 03), oversized light display headings, tabular stat row, generous whitespace. The Palantir and Vercel-trimmed aesthetic. Reads as quiet authority and institutional-grade seriousness.</p>
+      <div class="meta">
+        <span>12-col grid</span>
+        <span>strict rules</span>
+        <span>tabular stats</span>
+        <span>300 weight display</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+
+    <a href="variant-d-palantir-dark.html" class="card dark">
+      <div class="vtag"><span>Variant D</span><span>Stele</span></div>
+      <h2>Palantir dark + Langchain <span class="wm">dev</span></h2>
+      <p>Near-black background, cyan + green accents, subtle grid and radial glow, terminal shell as hero with live status pip, monospace CTAs ($ request_access). Reads as infrastructure-grade and developer-coded. Best for Palantir vibe your teammate wants.</p>
+      <div class="meta">
+        <span>dark theme</span>
+        <span>cyan accent</span>
+        <span>terminal shell</span>
+        <span>mono CTAs</span>
+      </div>
+      <div class="open">Open variant</div>
+    </a>
+  </div>
+
+  <div class="notes">
+    <h3>Notes for swapping in the real font and real data</h3>
+    <ul>
+      <li>All four use <code>Alliance No.1</code> as the primary font with <code>Inter</code> as the fallback. Once you license Alliance No.1, drop in the woff2 files and add an <code>@font-face</code> block at the top of each file.</li>
+      <li>Stats in the hero (2.4B ticks, 18TB, etc.) are placeholder values tuned to sound plausible. Swap to real numbers before sharing with investors.</li>
+      <li>The ASCII terminal block shows a fake WILL_FED_CUT_MAY_2026 query. The data is synthetic. Replace with a real run against your BTC/Kalshi pipeline when you are comfortable showing it.</li>
+      <li>CTA email is <code>hello@ephemeris.xyz</code> / <code>hello@stele.xyz</code>. Swap to your real address, or wire up Formspree / Tally / a Cal.com link once the name is locked.</li>
+      <li>Wordmark name lives in <code>nav</code>, the hero headline, footer, and page title in each file. Global find-replace once you pick the real name.</li>
+    </ul>
+  </div>
+
+  <footer>
+    <b>Next step:</b> skim the three refined Swiss-Glass variants at the top. Pick Light, Cream, or Dark based on which mood fits the investor / accelerator pitch better. Once you pick, I can port over any element you want from the four exploration variants below (the ticker bar from brutalist, the terminal shell from Palantir dark, etc.) and lock the final version.
+  </footer>
+</div>
+
+</body>
+</html>
