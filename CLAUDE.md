@@ -6,27 +6,24 @@ Bloomberg Terminal for prediction markets (Kalshi + Polymarket). This repo holds
 
 ```
 .
-├── 02 Landing Light.html          Swiss-glass light landing page
-├── 04 Product Demo - final.html   Dark workbench UI (keeper — use this one)
-├── 04 Product Demo v2 (1).html    Original workbench, pre-cleanup (reference)
-├── 04 Product Demo - banner.html  Disclaimer variant: top strip (superseded)
-├── 04 Product Demo - pill.html    Disclaimer variant: bottom-right pill (superseded)
-├── 04 Product Demo - modal.html   Disclaimer variant: modal on load (superseded)
+├── index.html            Swiss-glass light landing page (served at /)
+├── demo.html             Dark workbench UI (served at /demo)
 ├── workbench/
-│   └── context-kinds.js           Kind-aware right pane (Dota / NFL / NBA / soccer)
-├── archive/                       Older variants (swiss-glass-*, variant-a/b/c/d, etc.)
-├── stack.md                       Asset/demo tooling stack + shoot plan for YC app
-└── positioning.md                 Product positioning + competitive landscape
+│   └── context-kinds.js  Kind-aware right pane (Dota / NFL / NBA / soccer)
+├── vercel.json           cleanUrls + trailingSlash config
+├── archive/              Older variants (swiss-glass-*, variant-a/b/c/d, etc.)
+├── stack.md              Asset/demo tooling stack + shoot plan for YC app
+└── positioning.md        Product positioning + competitive landscape
 ```
 
 ## Running locally
 
-Open via a local server — **not** `file://` — or the `workbench/context-kinds.js` load may be blocked:
+Open via a local server — **not** `file://` — or the `workbench/context-kinds.js` load may be blocked. Clean URLs (`/demo`) only work on Vercel; locally use the `.html` suffix.
 
 ```bash
 python3 -m http.server 8787
-open "http://localhost:8787/04%20Product%20Demo%20-%20final.html"
-open "http://localhost:8787/02%20Landing%20Light.html"
+open "http://localhost:8787/"          # landing
+open "http://localhost:8787/demo.html" # workbench
 ```
 
 ## Workbench: what it shows
@@ -54,7 +51,7 @@ open "http://localhost:8787/02%20Landing%20Light.html"
 
 ## Saved queries
 
-Defined in `queries` object inside `04 Product Demo - final.html`. Each query has:
+Defined in `queries` object inside `demo.html`. Each query has:
 
 - `sym`, `label`, `rows`, `cad`, `kind`
 - `question` — natural-language market headline
