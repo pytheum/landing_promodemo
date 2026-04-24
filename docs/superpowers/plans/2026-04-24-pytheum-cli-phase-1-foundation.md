@@ -676,6 +676,13 @@ signer_private_key = "0xdeadbeef"
         load_config(config_path=cfg_path)
 
 
+def test_malformed_toml_raises_config_error(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("this is = not [valid toml\n")
+    with pytest.raises(ConfigError, match="malformed TOML"):
+        load_config(config_path=cfg_path)
+
+
 def test_path_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     cfg = load_config(config_path=None)
@@ -874,11 +881,18 @@ def load_config(
     config_path: Path | None = None,
     env_prefix: str = "PYTHEUM_",
 ) -> Config:
-    """Load config from TOML (optional) + env overrides. Defaults fill gaps."""
+    """Load config from TOML (optional) + env overrides. Defaults fill gaps.
+
+    Raises ConfigError for any failure the caller might want to display —
+    malformed TOML, forbidden raw secrets, or pydantic validation errors.
+    """
     data: dict[str, Any] = {}
     if config_path is not None and config_path.exists():
-        with config_path.open("rb") as f:
-            data = tomllib.load(f)
+        try:
+            with config_path.open("rb") as f:
+                data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            raise ConfigError(f"malformed TOML in {config_path}: {e}") from e
         _scrub_secrets(data)
     data = _apply_env_overrides(data, env_prefix)
     try:
@@ -893,7 +907,7 @@ def load_config(
 uv run pytest tests/core/test_config.py -v
 ```
 
-Expected: all 7 tests pass.
+Expected: all 8 tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -982,7 +996,8 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any, MutableMapping, TextIO
+from collections.abc import MutableMapping
+from typing import Any, TextIO
 
 import structlog
 
@@ -2552,25 +2567,42 @@ uv run pytest tests/data/test_models.py -v
 
 Expected: new tests fail with `ImportError` or attribute errors.
 
-- [ ] **Step 3: Append entity models to `src/pytheum/data/models.py`**
+- [ ] **Step 3: Extend `src/pytheum/data/models.py` with entity models**
 
-Append (keep existing enum definitions, add below them):
+Replace the **top import block** (leave the `StrEnum` + enum classes from Task 10 intact) with:
 
 ```python
+"""Pydantic v2 domain models and enums. See spec §4."""
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+```
 
-__all__ += [
+Then extend `__all__` (below the enum classes, before the new model classes):
+
+```python
+__all__ = [
     "Category",
     "Event",
     "Market",
     "Outcome",
+    "PriceUnit",
+    "SizeUnit",
+    "Venue",
+    "VolumeMetric",
 ]
+```
 
+(Replace the Task 10 `__all__` entirely — do not use `__all__ += [...]` on a reassigned list.)
 
+Then **append the new classes** at the end of the file (no further imports):
+
+```python
 class _Record(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -2751,14 +2783,31 @@ uv run pytest tests/data/test_models.py -v
 
 Expected: new fact-model tests fail on `ImportError`.
 
-- [ ] **Step 3: Append fact models**
+- [ ] **Step 3: Extend `src/pytheum/data/models.py` with fact models**
 
-Append to `src/pytheum/data/models.py`:
+No new imports — `datetime`, `Decimal`, `Literal`, and the pydantic symbols were all added in Task 14.
+
+Update the existing `__all__` block to include the three new symbols — the final `__all__` should be exactly:
 
 ```python
-__all__ += ["OrderBook", "PricePoint", "Trade"]
+__all__ = [
+    "Category",
+    "Event",
+    "Market",
+    "OrderBook",
+    "Outcome",
+    "PricePoint",
+    "PriceUnit",
+    "SizeUnit",
+    "Trade",
+    "Venue",
+    "VolumeMetric",
+]
+```
 
+Then **append the new classes** at the end of the file:
 
+```python
 class Trade(_Record):
     venue: Venue
     market_native_id: str
@@ -3377,10 +3426,10 @@ Write `src/pytheum/data/storage.py`:
 """DuckDB storage wrapper + migration runner."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib import resources
 from pathlib import Path
-from typing import Iterator
 
 import duckdb
 
@@ -3449,7 +3498,7 @@ Replace the existing `[tool.hatch.build.targets.wheel]` block with the above.
 uv run pytest tests/data/test_storage.py -v
 ```
 
-Expected: all 6 tests pass. If `test_fk_violation_raises` fails because DuckDB doesn't enforce FKs by default, replace that test body with a skip: `pytest.skip("DuckDB doesn't enforce FKs at insert time in this version")` and document the limitation — but first try upgrading `duckdb` in `pyproject.toml` to the latest.
+Expected: all 7 tests pass. If `test_fk_violation_raises` fails because DuckDB doesn't enforce FKs by default, replace that test body with a skip: `pytest.skip("DuckDB doesn't enforce FKs at insert time in this version")` and document the limitation — but first try upgrading `duckdb` in `pyproject.toml` to the latest.
 
 - [ ] **Step 6: Commit schema + storage + tests together**
 
@@ -3516,18 +3565,30 @@ def test_doctor_exit_zero_in_clean_env(tmp_path: Path, monkeypatch: pytest.Monke
     assert "[FAIL]" not in result.output
 
 
-def test_doctor_fails_when_config_file_invalid(
+def test_doctor_fails_when_config_has_raw_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An existing but malformed config.toml must produce [FAIL] Config file and exit != 0, 2.
-    This guards against config errors going silent."""
+    """Raw-secret in config must produce [FAIL] Config file and exit 1."""
     monkeypatch.setenv("HOME", str(tmp_path))
     pytheum_dir = tmp_path / ".pytheum"
     pytheum_dir.mkdir()
-    # Raw-secret rejection is a ConfigError path; use it to force a FAIL.
     (pytheum_dir / "config.toml").write_text(
         '[venues.polymarket]\nsigner_private_key = "0xdeadbeef"\n'
     )
+    result = runner.invoke(app, ["doctor"])
+    assert "[FAIL]" in result.output
+    assert "Config file" in result.output
+    assert result.exit_code == 1
+
+
+def test_doctor_fails_when_config_is_malformed_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed TOML must produce [FAIL] Config file and exit 1 (not crash)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pytheum_dir = tmp_path / ".pytheum"
+    pytheum_dir.mkdir()
+    (pytheum_dir / "config.toml").write_text("this is = not [valid toml\n")
     result = runner.invoke(app, ["doctor"])
     assert "[FAIL]" in result.output
     assert "Config file" in result.output
@@ -3569,7 +3630,11 @@ from pytheum.data.storage import Storage
 console = Console()
 
 MIN_PY = (3, 12)
-_EXPECTED_CONFIG_PATH = Path.home() / ".pytheum" / "config.toml"
+
+
+def _expected_config_path() -> Path:
+    """Computed lazily so tests that monkeypatch HOME see the updated path."""
+    return Path.home() / ".pytheum" / "config.toml"
 
 
 @dataclass
@@ -3582,18 +3647,19 @@ class Check:
 def _resolve_config() -> tuple[Check, Config | None]:
     """Try to load the config from the canonical path. Return (check, cfg-or-None).
 
-    If the file exists but is invalid (malformed TOML, raw-secret rejection),
-    emit a FAIL check and return None — doctor still continues so other
-    checks run, but the exit code will be non-zero.
+    If the file exists but is invalid (malformed TOML, raw-secret rejection,
+    pydantic validation failure), emit a FAIL check and return None — doctor
+    still continues so other checks run, but the exit code will be non-zero.
     """
-    if not _EXPECTED_CONFIG_PATH.exists():
+    expected = _expected_config_path()
+    if not expected.exists():
         cfg = load_config(config_path=None)
-        return Check("Config file", "WARN", f"{_EXPECTED_CONFIG_PATH} not present — using defaults"), cfg
+        return Check("Config file", "WARN", f"{expected} not present — using defaults"), cfg
     try:
-        cfg = load_config(config_path=_EXPECTED_CONFIG_PATH)
+        cfg = load_config(config_path=expected)
     except ConfigError as e:
-        return Check("Config file", "FAIL", f"{_EXPECTED_CONFIG_PATH}: {e}"), None
-    return Check("Config file", "OK", str(_EXPECTED_CONFIG_PATH)), cfg
+        return Check("Config file", "FAIL", f"{expected}: {e}"), None
+    return Check("Config file", "OK", str(expected)), cfg
 
 
 def _check_python() -> Check:
@@ -3705,7 +3771,7 @@ app.command(name="doctor", help="Health checks against the local environment.")(
 uv run pytest tests/cli/test_doctor.py -v
 ```
 
-Expected: both tests pass.
+Expected: all 4 tests pass.
 
 - [ ] **Step 6: Manual smoke test**
 
