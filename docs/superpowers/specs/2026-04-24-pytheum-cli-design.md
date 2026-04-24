@@ -285,7 +285,7 @@ If any of the six is missing for a given endpoint at the end of Phase 2, that en
 
 ### 4.1 Normalized models (pydantic v2)
 
-**Raw persistence is mandatory for any row in a normalized table.** Every normalized row's `raw_id` points into the single `raw_payloads` table (§5.1) — a globally-unique identifier, no per-transport ambiguity. Objects held in memory by the TTL cache may have `raw_id = None` (not yet persisted), but `MarketRepository.upsert(...)` rejects any write without a matching `raw_id`. There is no `persist_raw=False` flag — if you want ephemeral data, use the cache, not the repository.
+**Raw persistence is mandatory for any venue-derived entity/fact row** (see §5.2 for the exact set of tables this applies to — derived join tables and user-authored tables document provenance differently). Every such row's `raw_id` points into the single `raw_payloads` table (§5.1) — a globally-unique identifier, no per-transport ambiguity. Objects held in memory by the TTL cache may have `raw_id = None` (not yet persisted), but `MarketRepository.upsert(...)` rejects any write without a matching `raw_id`. There is no `persist_raw=False` flag — if you want ephemeral data, use the cache, not the repository.
 
 **Outcomes are first-class.** Orderbooks, trades, and price points attach to `(venue, market_native_id, outcome_id)`, not to the market alone. Every binary market has exactly two Outcome rows; multi-outcome Polymarket events are still modelled as N sibling Markets (venue-native), but each of those Markets has two Outcomes (YES / NO tokens) with their own token_ids and per-side books.
 
