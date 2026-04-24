@@ -614,6 +614,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from pytheum.core.config import Config, ConfigError, load_config
 
@@ -692,7 +693,9 @@ def test_path_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_config_is_frozen() -> None:
     cfg = load_config(config_path=None)
-    with pytest.raises((AttributeError, TypeError)):
+    # Pydantic v2 frozen BaseModel raises ValidationError on assignment;
+    # older Python frozen dataclasses raise AttributeError/TypeError. Accept any.
+    with pytest.raises((AttributeError, TypeError, ValidationError)):
         cfg.tui.theme = "dark"  # type: ignore[misc]
 ```
 
