@@ -182,11 +182,22 @@ pytheum-cli/
 
 ### Runtime dependencies
 
-`httpx`, `websockets`, `pydantic >= 2`, `duckdb`, `pyarrow`, `rapidfuzz`, `typer`, `rich`, `textual`, `structlog`, `cryptography`, `tomli-w`, `platformdirs`.
+`httpx`, `websockets`, `pydantic >= 2`, `duckdb`, `pyarrow`, `rapidfuzz`, `typer`, `rich`, `textual`, `structlog`, `cryptography`, `tomli-w`, `keyring`.
 
 ---
 
 ## 3. Endpoint coverage matrix
+
+**Status of this section: provisional.** The tables below enumerate the endpoints we intend to cover in v1, drawn from venue docs and the algodawg review. Before any endpoint is marked "implemented" during Phase 2, it must pass this checklist:
+
+1. **Live fixture captured** — one real response saved to `tests/fixtures/{venue}/` as JSON
+2. **Response schema documented** — either via pydantic model + tests or a `.schema.json` alongside the fixture
+3. **Pagination behavior confirmed** — cursor / offset / none, with page-size limits
+4. **Rate-limit behavior confirmed** — observed headers (X-RateLimit-*), documented in code comments
+5. **Normalizer test** — a unit test that takes the fixture and produces the expected normalized model(s)
+6. **Error-path test** — a unit test for the venue's common error shape (401 / 404 / 429 / 5xx)
+
+If any of the six is missing for a given endpoint at the end of Phase 2, that endpoint reverts to "deferred" status and does not ship in v1.
 
 ### 3.1 Kalshi REST  (`https://api.elections.kalshi.com/trade-api/v2`)
 
@@ -272,78 +283,130 @@ pytheum-cli/
 
 ### 4.1 Normalized models (pydantic v2)
 
-Every normalized row preserves the venue's native identifier(s) and links back to its raw payload.
+**Raw persistence is mandatory for any row in a normalized table.** Objects held in memory by the TTL cache may have `raw_id = None` (not persisted), but the `MarketRepository.upsert(...)` interface rejects any write without a matching `raw_id`. There is no `persist_raw=False` flag — if you want ephemeral data, use the cache, not the repository.
+
+**Outcomes are first-class.** Orderbooks, trades, and price points attach to `(venue, market_native_id, outcome_id)`, not to the market alone. Every binary market has exactly two Outcome rows; multi-outcome Polymarket events are still modelled as N sibling Markets (venue-native), but each of those Markets has two Outcomes (YES / NO tokens) with their own token_ids and per-side books.
 
 ```python
 class Venue(StrEnum):
     KALSHI = "kalshi"
     POLYMARKET = "polymarket"
 
+class PriceUnit(StrEnum):
+    PROB_1_0  = "probability_1_0"   # [0.0, 1.0]  ← normalized
+    CENTS_100 = "cents_100"         # Kalshi native (0-100)
+    USDC      = "usdc"              # Polymarket native
+
+class SizeUnit(StrEnum):
+    CONTRACTS = "contracts"         # Kalshi
+    SHARES    = "shares"            # Polymarket token count
+    USDC      = "usdc"              # USDC notional
+
+class VolumeMetric(StrEnum):
+    USD_24H        = "usd_24h"
+    USD_TOTAL      = "usd_total"
+    CONTRACTS_24H  = "contracts_24h"
+    CONTRACTS_TOTAL = "contracts_total"
+    UNKNOWN        = "unknown"
+
 class Category(BaseModel):
     venue: Venue
-    native_id: str          # e.g., Kalshi series_ticker "FED" or Polymarket tag_id
-    native_label: str       # raw venue label — always shown to the user
-    display_label: str      # best-effort normalized ("Economics")
+    native_id: str           # Kalshi series_ticker ("FED") or Polymarket tag_id
+    native_label: str        # raw venue label — always shown to the user
+    display_label: str       # best-effort normalized ("Economics")
 
 class Event(BaseModel):
     venue: Venue
-    native_id: str          # Kalshi event_ticker / Polymarket event id or slug
+    native_id: str           # Kalshi event_ticker / Polymarket event id-or-slug
     title: str
-    category: Category | None
+    primary_category: Category | None
+    tags: list[Category] = []                 # Polymarket may have multiple
     closes_at: datetime | None
     market_count: int
     aggregate_volume: Decimal | None
-    raw_id: int             # FK → raw_rest
+    volume_metric: VolumeMetric
+    url: str | None                           # canonical venue URL
+    raw_id: int | None = None                 # None in memory; required for DB writes
+    schema_version: int
+
+class Outcome(BaseModel):
+    venue: Venue
+    market_native_id: str                     # FK → markets
+    outcome_id: str                           # Kalshi: "yes"/"no" · Polymarket: token_id
+    token_id: str | None                      # Polymarket only (== outcome_id there)
+    label: str                                # "YES" / "NO" / "Eric Adams" etc.
+    price: Decimal | None                     # normalized [0.0, 1.0]
+    native_price: Decimal | None              # venue's raw value
+    price_unit: PriceUnit
+    volume: Decimal | None                    # in volume_metric units
+    volume_metric: VolumeMetric
+    is_resolved: bool = False
+    resolution: bool | None = None            # None while open; True/False after settle
+    raw_id: int | None = None
     schema_version: int
 
 class Market(BaseModel):
     venue: Venue
-    native_id: str          # Kalshi market ticker / Polymarket conditionId
-    token_ids: list[str] = []   # Polymarket: YES/NO token_ids; Kalshi: []
+    native_id: str                            # Kalshi market ticker / Polymarket conditionId
     event_native_id: str | None
     title: str
     question: str
     status: Literal["open", "closed", "settled", "unopened", "paused"]
-    yes_price: Decimal | None
-    no_price: Decimal | None
-    volume: Decimal | None          # native venue volume — NOT cross-venue normalized
-    volume_metric: Literal["usd_24h", "usd_total", "contracts_24h", "unknown"]
+    outcomes: list[Outcome]                   # length 2 for binary
+    total_volume: Decimal | None              # native venue value
+    volume_metric: VolumeMetric
     open_interest: Decimal | None
     liquidity: Decimal | None
     closes_at: datetime | None
-    raw_id: int
+    url: str | None                           # canonical venue URL
+    raw_id: int | None = None
     schema_version: int
 
 class Trade(BaseModel):
     venue: Venue
     market_native_id: str
-    price: Decimal
-    size: Decimal
+    outcome_id: str                           # which side traded
+    price: Decimal                            # normalized [0, 1]
+    native_price: Decimal                     # raw venue value
+    price_unit: PriceUnit
+    size: Decimal                             # normalized count
+    native_size: Decimal
+    size_unit: SizeUnit
+    notional: Decimal | None                  # size * price, in currency
+    currency: Literal["usd", "usdc"]
     side: Literal["buy", "sell"] | None
     timestamp: datetime
-    raw_id: int
+    raw_id: int | None = None
     schema_version: int
 
 class OrderBook(BaseModel):
     venue: Venue
     market_native_id: str
-    bids: list[tuple[Decimal, Decimal]]   # (price, size), sorted desc
+    outcome_id: str                           # per-side book — required
+    bids: list[tuple[Decimal, Decimal]]       # (price, size), normalized units, sorted desc
     asks: list[tuple[Decimal, Decimal]]
+    price_unit: PriceUnit
+    size_unit: SizeUnit
     timestamp: datetime
-    raw_id: int
+    raw_id: int | None = None
     schema_version: int
 
 class PricePoint(BaseModel):
     venue: Venue
     market_native_id: str
+    outcome_id: str                           # per-side history
     timestamp: datetime
-    yes_price: Decimal
-    no_price: Decimal | None
+    price: Decimal                            # normalized [0, 1]
+    native_price: Decimal
+    price_unit: PriceUnit
     volume: Decimal | None
-    interval: Literal["1m", "1h", "1d"]
-    raw_id: int
+    volume_metric: VolumeMetric
+    interval: Literal["1m", "5m", "1h", "6h", "1d", "1w", "1mo", "all", "max"]
+    raw_id: int | None = None
     schema_version: int
 ```
+
+**Note on interval values:** the set above is the union of what Kalshi (1m/1h/1d) and Polymarket CLOB (1h/6h/1d/1w/1m/all/max) expose; `1mo` (1 month) is used internally to avoid collision with `1m` (1 minute).
 
 ### 4.2 Freshness / stream state enums
 
@@ -372,6 +435,91 @@ Granularity:
 - **Detail views** (market_detail) show one freshness badge per data source: `metadata [LIVE]`, `chart [CACHED · 30s]`, `orderbook [LIVE]` (WS-backed), `trades [LIVE]` (WS-backed).
 - **Offline** or **FAILED** states are hoisted to a screen-level banner regardless of granularity.
 
+### 4.3 MarketRef / EventRef — first-class identifier
+
+Every place in the system that refers to a market or event uses a typed reference. URL resolution, CLI args, watchlist entries, TUI navigation, and the command palette all go through `MarketRef`.
+
+```python
+class RefType(StrEnum):
+    KALSHI_TICKER           = "kalshi_ticker"          # "FED-25DEC-T4.00"
+    KALSHI_EVENT_TICKER     = "kalshi_event_ticker"    # "FED-25DEC"
+    POLYMARKET_CONDITION_ID = "polymarket_condition_id"  # 66-char 0x…
+    POLYMARKET_TOKEN_ID     = "polymarket_token_id"      # decimal string
+    POLYMARKET_EVENT_SLUG   = "polymarket_event_slug"    # "nyc-mayoral-2026"
+    POLYMARKET_MARKET_SLUG  = "polymarket_market_slug"   # "eric-adams-wins-nyc-mayor-2026"
+    URL                     = "url"                     # full venue URL
+
+class MarketRef(BaseModel):
+    venue: Venue
+    ref_type: RefType
+    value: str
+    outcome_id: str | None = None         # optional — points at a specific side
+
+    def canonical(self) -> "MarketRef":
+        """Return the ref_type this venue considers primary (KALSHI_TICKER or
+        POLYMARKET_CONDITION_ID), resolving slugs / URLs / token_ids via the
+        data layer as needed."""
+        ...
+
+class EventRef(BaseModel):
+    venue: Venue
+    ref_type: RefType
+    value: str
+```
+
+CLI args that take a market accept any `RefType` and auto-detect via regex — `pytheum markets show FED-25DEC-T4.00` vs `pytheum markets show 0xabc…` vs `pytheum markets show --ref-type polymarket_market_slug fomc-dec-2025-cut-25bps`. Ambiguous input (e.g., a short token id) fails fast with a clear error listing the detected candidates.
+
+### 4.4 Service error types
+
+All service-layer errors inherit from `PytheumError` and surface to the CLI / TUI with actionable messages.
+
+```python
+class PytheumError(Exception): ...
+
+class RateLimited(PytheumError):
+    venue: Venue
+    retry_after_s: float | None
+
+class VenueUnavailable(PytheumError):
+    venue: Venue
+    status_code: int | None
+    cause: Exception | None
+
+class AuthRequired(PytheumError):
+    venue: Venue
+    endpoint: str
+
+class MalformedURL(PytheumError):
+    raw_input: str
+    supported_patterns: list[str]
+
+class UnresolvedRef(PytheumError):
+    ref: MarketRef
+    reason: str
+
+class SchemaDrift(PytheumError):
+    venue: Venue
+    endpoint: str
+    raw_id: int            # raw payload preserved for post-hoc inspection
+    validator_errors: list[str]
+
+class NoResults(PytheumError):
+    query: str
+    scope: str             # "search" | "markets" | "events" | "watchlist"
+
+class UnsupportedEndpoint(PytheumError):
+    venue: Venue
+    endpoint: str
+    reason: str            # e.g., "authenticated, deferred to v2"
+
+class StaleCacheOnly(PytheumError):
+    """Network path failed and cache returned data older than the
+    hard limit. Service returns the stale value + this exception so
+    callers can decide whether to display."""
+    cached_value: object
+    age_s: float
+```
+
 ---
 
 ## 5. Storage — DuckDB schema
@@ -380,43 +528,51 @@ Single embedded file at `~/.pytheum/pytheum.duckdb`. **Raw first, normalized sec
 
 ### 5.1 Raw tables (append-only)
 
-```sql
-CREATE TABLE raw_rest (
-    id             BIGINT PRIMARY KEY,
-    venue          VARCHAR NOT NULL,
-    endpoint       VARCHAR NOT NULL,          -- e.g., "kalshi:/markets/{ticker}"
-    request_params JSON,
-    received_ts    TIMESTAMPTZ NOT NULL,
-    source_ts      TIMESTAMPTZ,               -- venue-provided if available
-    schema_version INT NOT NULL,
-    native_ids     JSON,                      -- list of native IDs present in payload
-    payload        JSON NOT NULL,
-    status_code    INT,
-    duration_ms    INT
-);
+Explicit sequences; native `VARCHAR[]` for native IDs (DuckDB supports list types natively); no JSON-indexing dance.
 
+```sql
+CREATE SEQUENCE seq_raw_rest START 1;
+CREATE SEQUENCE seq_raw_ws   START 1;
+
+CREATE TABLE raw_rest (
+    id             BIGINT        PRIMARY KEY DEFAULT nextval('seq_raw_rest'),
+    venue          VARCHAR       NOT NULL,
+    endpoint       VARCHAR       NOT NULL,       -- "kalshi:/markets/{ticker}"
+    request_params JSON,
+    received_ts    TIMESTAMPTZ   NOT NULL,
+    source_ts      TIMESTAMPTZ,
+    schema_version INT           NOT NULL,
+    native_ids     VARCHAR[]     NOT NULL DEFAULT [],
+    payload        JSON          NOT NULL,
+    status_code    INT,
+    duration_ms    INT,
+    created_ts     TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE INDEX idx_raw_rest_venue_ep ON raw_rest(venue, endpoint, received_ts);
-CREATE INDEX idx_raw_rest_native ON raw_rest USING INDEX (native_ids);
 
 CREATE TABLE raw_ws (
-    id             BIGINT PRIMARY KEY,
-    venue          VARCHAR NOT NULL,
-    channel        VARCHAR NOT NULL,          -- e.g., "kalshi:orderbook_delta"
-    subscription   JSON,                      -- subscribe message
-    received_ts    TIMESTAMPTZ NOT NULL,
+    id             BIGINT        PRIMARY KEY DEFAULT nextval('seq_raw_ws'),
+    venue          VARCHAR       NOT NULL,
+    channel        VARCHAR       NOT NULL,       -- "kalshi:orderbook_delta"
+    subscription   JSON,
+    received_ts    TIMESTAMPTZ   NOT NULL,
     source_ts      TIMESTAMPTZ,
-    sequence_no    BIGINT,                    -- nullable (Polymarket has none)
-    schema_version INT NOT NULL,
-    native_ids     JSON,
-    payload        JSON NOT NULL
+    sequence_no    BIGINT,                       -- nullable (Polymarket has none)
+    schema_version INT           NOT NULL,
+    native_ids     VARCHAR[]     NOT NULL DEFAULT [],
+    payload        JSON          NOT NULL,
+    created_ts     TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE INDEX idx_raw_ws_venue_ch ON raw_ws(venue, channel, received_ts);
 ```
 
-Raw tables are **never deleted** by v1 code; rotation/pruning is a later decision. Persistence is **opt-in** per request (`client.get(..., persist_raw=False)` for hot paths where throughput matters).
+**Rule:** raw persistence is **mandatory for any data that becomes a normalized row**. Callers that want ephemeral read-through (e.g., a fast live tail) use the in-memory TTL cache and never touch the repository. There is no `persist_raw=False` flag — the two paths are separate code paths.
+
+Raw tables are **never deleted** by v1 code; rotation / pruning is a post-v1 decision.
 
 ### 5.2 Normalized tables
+
+`raw_id` is **NOT NULL** everywhere — the schema enforces the rule from §4.1. Migrations live in `src/pytheum/data/schema/` as numbered SQL files and run at startup.
 
 ```sql
 CREATE TABLE categories (
@@ -424,107 +580,202 @@ CREATE TABLE categories (
     native_id      VARCHAR NOT NULL,
     native_label   VARCHAR NOT NULL,
     display_label  VARCHAR NOT NULL,
-    raw_id         BIGINT,
+    raw_id         BIGINT NOT NULL,
     schema_version INT NOT NULL,
     updated_ts     TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (venue, native_id)
 );
 
 CREATE TABLE events (
-    venue              VARCHAR NOT NULL,
-    native_id          VARCHAR NOT NULL,
-    title              VARCHAR NOT NULL,
-    category_venue     VARCHAR,
-    category_native_id VARCHAR,
-    closes_at          TIMESTAMPTZ,
-    market_count       INT,
-    aggregate_volume   DECIMAL(20,4),
-    raw_id             BIGINT,
-    schema_version     INT NOT NULL,
-    updated_ts         TIMESTAMPTZ NOT NULL,
+    venue                      VARCHAR NOT NULL,
+    native_id                  VARCHAR NOT NULL,
+    title                      VARCHAR NOT NULL,
+    primary_category_venue     VARCHAR,
+    primary_category_native_id VARCHAR,
+    closes_at                  TIMESTAMPTZ,
+    market_count               INT,
+    aggregate_volume           DECIMAL(20,4),
+    volume_metric              VARCHAR NOT NULL,
+    url                        VARCHAR,
+    raw_id                     BIGINT NOT NULL,
+    schema_version             INT NOT NULL,
+    updated_ts                 TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (venue, native_id),
-    FOREIGN KEY (category_venue, category_native_id) REFERENCES categories(venue, native_id)
+    FOREIGN KEY (primary_category_venue, primary_category_native_id)
+        REFERENCES categories(venue, native_id)
+);
+
+-- many-to-many: Polymarket events can carry multiple tags
+CREATE TABLE event_tags (
+    event_venue      VARCHAR NOT NULL,
+    event_native_id  VARCHAR NOT NULL,
+    tag_venue        VARCHAR NOT NULL,
+    tag_native_id    VARCHAR NOT NULL,
+    PRIMARY KEY (event_venue, event_native_id, tag_venue, tag_native_id),
+    FOREIGN KEY (event_venue, event_native_id) REFERENCES events(venue, native_id),
+    FOREIGN KEY (tag_venue, tag_native_id)     REFERENCES categories(venue, native_id)
 );
 
 CREATE TABLE markets (
     venue           VARCHAR NOT NULL,
     native_id       VARCHAR NOT NULL,
-    token_ids       JSON,
+    event_venue     VARCHAR,
     event_native_id VARCHAR,
     title           VARCHAR NOT NULL,
     question        VARCHAR,
     status          VARCHAR NOT NULL,
-    yes_price       DECIMAL(10,6),
-    no_price        DECIMAL(10,6),
-    volume          DECIMAL(20,4),
+    total_volume    DECIMAL(20,4),
     volume_metric   VARCHAR NOT NULL,
     open_interest   DECIMAL(20,4),
     liquidity       DECIMAL(20,4),
     closes_at       TIMESTAMPTZ,
-    raw_id          BIGINT,
+    url             VARCHAR,
+    raw_id          BIGINT NOT NULL,
     schema_version  INT NOT NULL,
     updated_ts      TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (venue, native_id)
+    PRIMARY KEY (venue, native_id),
+    FOREIGN KEY (event_venue, event_native_id) REFERENCES events(venue, native_id)
+);
+
+CREATE TABLE outcomes (
+    venue            VARCHAR NOT NULL,
+    market_native_id VARCHAR NOT NULL,
+    outcome_id       VARCHAR NOT NULL,         -- Kalshi "yes"/"no" · Polymarket token_id
+    token_id         VARCHAR,                  -- Polymarket only
+    label            VARCHAR NOT NULL,
+    price            DECIMAL(10,6),            -- normalized [0,1]
+    native_price     DECIMAL(20,6),
+    price_unit       VARCHAR NOT NULL,
+    volume           DECIMAL(20,4),
+    volume_metric    VARCHAR NOT NULL,
+    is_resolved      BOOLEAN NOT NULL DEFAULT FALSE,
+    resolution       BOOLEAN,
+    raw_id           BIGINT NOT NULL,
+    schema_version   INT NOT NULL,
+    updated_ts       TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (venue, market_native_id, outcome_id),
+    FOREIGN KEY (venue, market_native_id) REFERENCES markets(venue, native_id)
+);
+
+CREATE INDEX idx_outcomes_token ON outcomes(venue, token_id);
+
+-- user-added or heuristic aliases for search
+CREATE TABLE market_aliases (
+    venue            VARCHAR NOT NULL,
+    market_native_id VARCHAR NOT NULL,
+    alias            VARCHAR NOT NULL,
+    source           VARCHAR NOT NULL,         -- "user" | "heuristic" | "venue"
+    PRIMARY KEY (venue, market_native_id, alias),
+    FOREIGN KEY (venue, market_native_id) REFERENCES markets(venue, native_id)
 );
 
 CREATE TABLE trades (
     venue            VARCHAR NOT NULL,
     market_native_id VARCHAR NOT NULL,
+    outcome_id       VARCHAR NOT NULL,
     price            DECIMAL(10,6) NOT NULL,
+    native_price     DECIMAL(20,6) NOT NULL,
+    price_unit       VARCHAR NOT NULL,
     size             DECIMAL(20,4) NOT NULL,
+    native_size      DECIMAL(20,4) NOT NULL,
+    size_unit        VARCHAR NOT NULL,
+    notional         DECIMAL(20,4),
+    currency         VARCHAR NOT NULL,
     side             VARCHAR,
     timestamp        TIMESTAMPTZ NOT NULL,
-    raw_id           BIGINT,
+    raw_id           BIGINT NOT NULL,
     schema_version   INT NOT NULL
 );
-
-CREATE INDEX idx_trades_market_time ON trades(venue, market_native_id, timestamp);
+CREATE INDEX idx_trades_mkt_out_time ON trades(venue, market_native_id, outcome_id, timestamp);
 
 CREATE TABLE orderbook_snaps (
     venue            VARCHAR NOT NULL,
     market_native_id VARCHAR NOT NULL,
-    bids             JSON NOT NULL,
+    outcome_id       VARCHAR NOT NULL,
+    bids             JSON NOT NULL,            -- [[price, size], ...]
     asks             JSON NOT NULL,
+    price_unit       VARCHAR NOT NULL,
+    size_unit        VARCHAR NOT NULL,
     timestamp        TIMESTAMPTZ NOT NULL,
-    raw_id           BIGINT,
+    raw_id           BIGINT NOT NULL,
     schema_version   INT NOT NULL
 );
-
-CREATE INDEX idx_book_market_time ON orderbook_snaps(venue, market_native_id, timestamp);
+CREATE INDEX idx_book_mkt_out_time ON orderbook_snaps(venue, market_native_id, outcome_id, timestamp);
 
 CREATE TABLE price_points (
     venue            VARCHAR NOT NULL,
     market_native_id VARCHAR NOT NULL,
+    outcome_id       VARCHAR NOT NULL,
     timestamp        TIMESTAMPTZ NOT NULL,
-    yes_price        DECIMAL(10,6) NOT NULL,
-    no_price         DECIMAL(10,6),
+    price            DECIMAL(10,6) NOT NULL,
+    native_price     DECIMAL(20,6) NOT NULL,
+    price_unit       VARCHAR NOT NULL,
     volume           DECIMAL(20,4),
-    interval         VARCHAR NOT NULL,
-    raw_id           BIGINT,
+    volume_metric    VARCHAR NOT NULL,
+    interval         VARCHAR NOT NULL,         -- 1m | 5m | 1h | 6h | 1d | 1w | 1mo | all | max
+    raw_id           BIGINT NOT NULL,
     schema_version   INT NOT NULL,
-    PRIMARY KEY (venue, market_native_id, interval, timestamp)
+    PRIMARY KEY (venue, market_native_id, outcome_id, interval, timestamp)
 );
 ```
 
 ### 5.3 Search index
 
-Built on top of the normalized tables, not a separate system:
+Built on top of the normalized tables with explicit joins so every field listed in §8.1 is actually present in the searchable blob.
 
 ```sql
 CREATE VIEW searchable_markets AS
 SELECT
-    venue,
-    native_id,
-    title,
-    question,
-    event_native_id,
-    -- concatenated searchable blob for rapidfuzz
-    concat_ws(' | ', venue, native_id, title, question, coalesce(event_native_id, ''))
-        AS search_blob
-FROM markets;
+    m.venue,
+    m.native_id,
+    m.title                  AS market_title,
+    m.question,
+    m.url                    AS market_url,
+    m.event_venue,
+    m.event_native_id,
+    e.title                  AS event_title,
+    e.url                    AS event_url,
+    c.native_id              AS primary_category_native_id,
+    c.native_label           AS primary_category_native_label,
+    c.display_label          AS primary_category_display_label,
+    -- outcome-side info (token_ids, labels, resolution)
+    (SELECT list_transform(list(o.token_id), x -> coalesce(x, ''))
+       FROM outcomes o
+       WHERE o.venue = m.venue AND o.market_native_id = m.native_id) AS token_ids,
+    (SELECT list(o.label)
+       FROM outcomes o
+       WHERE o.venue = m.venue AND o.market_native_id = m.native_id) AS outcome_labels,
+    -- event tags (polymarket-style many-to-many)
+    (SELECT list(tag_c.native_label)
+       FROM event_tags et
+       JOIN categories tag_c
+         ON et.tag_venue = tag_c.venue AND et.tag_native_id = tag_c.native_id
+       WHERE et.event_venue = m.event_venue
+         AND et.event_native_id = m.event_native_id) AS tags,
+    -- user + heuristic aliases
+    (SELECT list(a.alias)
+       FROM market_aliases a
+       WHERE a.venue = m.venue AND a.market_native_id = m.native_id) AS aliases,
+    -- concatenated blob for rapidfuzz / ILIKE
+    concat_ws(' | ',
+        m.venue,
+        m.native_id,
+        m.title,
+        coalesce(m.question, ''),
+        coalesce(m.url, ''),
+        coalesce(e.title, ''),
+        coalesce(c.native_label, ''),
+        coalesce(c.display_label, '')
+    ) AS search_blob
+FROM markets m
+LEFT JOIN events e
+    ON m.event_venue = e.venue AND m.event_native_id = e.native_id
+LEFT JOIN categories c
+    ON e.primary_category_venue = c.venue
+   AND e.primary_category_native_id = c.native_id;
 ```
 
-Service-side search loads titles + tickers + aliases into memory, fuzzy-scores with `rapidfuzz`, and falls back to DuckDB `ILIKE` on the raw blob for exact substring.
+Service-side search (§8) loads `search_blob` + list columns into memory, runs exact / substring / rapidfuzz pipeline, and merges results. The `EmbeddingAdapter` (v2) operates on the same per-row document.
 
 ### 5.4 Export
 
@@ -535,43 +786,81 @@ Export commands use DuckDB's native:
 
 No separate parquet/CSV writer code.
 
+### 5.5 Cache TTLs
+
+The TTL cache sits between services and the repository; it never persists. These defaults drive the freshness-badge math (§4.2).
+
+| Resource | TTL | Stale-cache hard limit |
+|---|---|---|
+| Categories list | 1h | 24h |
+| Events list | 5m | 1h |
+| Markets list (per filter) | 2m | 15m |
+| Market detail | 30s | 5m |
+| Outcome (per-side price) | 10s | 2m |
+| Orderbook snapshot (REST) | 5s | 30s |
+| Trades (REST historical page) | 30s | 10m |
+| Price history (per interval) | 5m | 1h |
+| Tags / search index rebuild | 15m | 1h |
+
+Once data crosses the stale-cache hard limit and the network path has failed, the service returns the last value alongside a `StaleCacheOnly` exception — the UI decides whether to show it. WS-backed data doesn't use these TTLs; it tracks `StreamState` directly.
+
+TTLs are overridable via config:
+
+```toml
+[cache.ttl_s]
+categories         = 3600
+events_list        = 300
+markets_list       = 120
+market_detail      = 30
+outcome            = 10
+orderbook_rest     = 5
+trades_rest        = 30
+price_history      = 300
+tags               = 900
+```
+
 ---
 
 ## 6. Auth model
 
 ### 6.1 Config slots (defined now, mostly inert in v1)
 
+**Secrets policy:** no raw private keys in TOML, ever. The config holds only non-secret identifiers and **references** to where a secret should be read from (an env var name or a keyring service name). The config file is safe to `cat`, commit as an `.example`, or share for support.
+
 ```toml
 # ~/.pytheum/config.toml
 
 [venues.kalshi]
-api_key            = ""        # KALSHI-ACCESS-KEY header
-private_key_path   = ""        # path to PEM, read lazily; RSA-PSS signing for /portfolio/*
-base_url           = "https://api.elections.kalshi.com/trade-api/v2"
-ws_url             = "wss://api.elections.kalshi.com/trade-api/ws/v2"
-rate_limit_per_sec = 10
+# Public endpoints work without any of the below.
+api_key_env_var           = "PYTHEUM_KALSHI_API_KEY"      # reads the KEY (not the name)
+private_key_path          = ""                            # filesystem path to PEM
+private_key_keyring       = ""                            # alt: keyring service name
+base_url                  = "https://api.elections.kalshi.com/trade-api/v2"
+ws_url                    = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+rate_limit_per_sec        = 10
 
 [venues.polymarket]
-# Polymarket auth slots reserved for future trading features
-funder_address     = ""
-signer_private_key = ""        # reads from keyring if empty
-gamma_url          = "https://gamma-api.polymarket.com"
-clob_url           = "https://clob.polymarket.com"
-data_url           = "https://data-api.polymarket.com"
-ws_url             = "wss://ws-subscriptions-clob.polymarket.com/ws"
-rate_limit_per_sec = 10
+# Authenticated trading is deferred to v2. These slots only hold references.
+funder_address            = ""                            # public address (non-secret)
+signer_private_key_env    = ""                            # env var NAME that holds the key
+signer_private_key_keyring = ""                           # alt: keyring service name
+gamma_url                 = "https://gamma-api.polymarket.com"
+clob_url                  = "https://clob.polymarket.com"
+data_url                  = "https://data-api.polymarket.com"
+ws_url                    = "wss://ws-subscriptions-clob.polymarket.com/ws"
+rate_limit_per_sec        = 10
 
 [storage]
-duckdb_path        = "~/.pytheum/pytheum.duckdb"
-watchlist_path    = "~/.pytheum/watchlist.toml"
-exports_dir        = "~/.pytheum/exports"
-logs_dir           = "~/.pytheum/logs"
+duckdb_path               = "~/.pytheum/pytheum.duckdb"
+watchlist_path            = "~/.pytheum/watchlist.toml"
+exports_dir               = "~/.pytheum/exports"
+logs_dir                  = "~/.pytheum/logs"
 
 [tui]
-theme              = "dark"    # dark | light | high-contrast
+theme                     = "dark"   # dark | light | high-contrast
 ```
 
-Environment overrides via `PYTHEUM_*` prefix: `PYTHEUM_VENUES__KALSHI__API_KEY=…`.
+Environment overrides via `PYTHEUM_*` prefix for non-secret fields: `PYTHEUM_VENUES__KALSHI__RATE_LIMIT_PER_SEC=5`. **Secrets are never read from `PYTHEUM_VENUES__…` — only through the env-var-name or keyring-service slots above.** Config validation rejects any attempt to stuff a raw key into the config.
 
 ### 6.2 v1 auth behavior
 
@@ -580,9 +869,40 @@ Environment overrides via `PYTHEUM_*` prefix: `PYTHEUM_VENUES__KALSHI__API_KEY=�
 
 ### 6.3 Secrets handling
 
+- No raw secrets in config files — only references (env var names or keyring service names). Config validation rejects any field whose name doesn't end in `_env_var` / `_env` / `_keyring` / `_path` from containing long random strings.
 - Secrets never logged (structlog processor scrubs known key names).
 - `private_key_path` values are resolved relative to the config file; bare filenames are rejected.
-- Keyring support (via `keyring` lib) is stubbed behind a `--keyring` flag; v1 reads from config/env only.
+- Keyring support (via `keyring` lib) is shipped in v1 as the preferred secrets backend; env var references are the portable fallback.
+
+### 6.4 Watchlist TOML schema
+
+The watchlist is a human-editable TOML file at `~/.pytheum/watchlist.toml`. Hand edits survive DB resets, and `pytheum watch add / remove` mutate it atomically (write-to-temp, rename).
+
+```toml
+# ~/.pytheum/watchlist.toml
+
+[[entries]]
+venue       = "kalshi"
+ref_type    = "kalshi_ticker"
+value       = "FED-25DEC-T4.00"
+outcome_id  = "yes"                    # optional — pin a specific side
+label       = "FOMC Dec ≤ 4.00% (YES)" # optional — shown in UI, auto-filled if empty
+notes       = ""                       # free-form
+added_ts    = 2026-04-24T12:00:00Z
+tags        = ["fomc", "macro"]        # user-level tags, separate from venue tags
+
+[[entries]]
+venue       = "polymarket"
+ref_type    = "polymarket_condition_id"
+value       = "0xabc123…"
+outcome_id  = ""                       # empty → watch both sides
+label       = ""
+notes       = ""
+added_ts    = 2026-04-24T12:05:00Z
+tags        = []
+```
+
+Any row that fails validation on load is surfaced as a warning banner on TUI start; the rest of the watchlist loads normally.
 
 ---
 
@@ -653,11 +973,12 @@ class EmbeddingAdapter(Protocol):
 
 ## 10. Categories — venue-native with normalization
 
-- Kalshi: derived from `series.category` field.
-- Polymarket: derived from `/tags` endpoint, filtered to user-visible top-level categories (excluding technical/internal tags).
+- Kalshi: each event has a single category derived from its `series.category`. One `primary_category` per event; `tags[]` is empty.
+- Polymarket: each event has zero-or-more tags. The **highest-weight** tag (per Polymarket's own ordering) becomes `primary_category`; the rest land in `tags[]`. This drives the Explorer's Categories column while preserving multi-tag membership for search.
 - **Navigation uses the venue's native category list.** No forced cross-venue taxonomy.
-- A best-effort `display_label` normalizes obvious synonyms for the "Categories" column, but the **`native_label` is always shown to the user** in the breadcrumb and in the market's metadata.
-- Example: a market from Polymarket tag `"politics"` shows under `Politics` in the explorer, but the market-detail header says `category: politics (polymarket)`.
+- A best-effort `display_label` normalizes obvious synonyms for the "Categories" column header, but the **`native_label` is always shown** in the breadcrumb and in the market-detail metadata.
+- Example: a Polymarket event tagged `politics` + `us-elections` + `2026` lands under `Politics` in the Explorer with `primary_category = politics`; the market-detail header reads `category: politics (polymarket) · tags: us-elections, 2026`.
+- Tags from Polymarket are persisted to the `event_tags` join table (§5.2) so they participate in search and can be filtered in the future without a schema change.
 
 ---
 
@@ -723,6 +1044,11 @@ Every action has at least one **portable** binding (works on any xterm-compatibl
 
 Bindings marked "terminal-dependent" are offered best-effort; the portable binding is always available and is what the help overlay recommends.
 
+**Quit safety.** Accidental `q` is common in keyboard-heavy TUIs:
+- On the **home** screen, `q` quits immediately.
+- On **any other screen**, `q` puts the footer into a "press q again to quit" prompt for 2 seconds; a second `q` confirms, any other key cancels. `ctrl+c` still quits without confirmation (escape hatch).
+- `:quit` / `:q` from command mode always quits immediately regardless of screen.
+
 **Every screen renders a persistent footer** listing the contextually valid shortcuts (~5–8 items). `?` opens the full map overlay.
 
 ### 11.4 Command mode `:`
@@ -761,9 +1087,9 @@ All commands call the same App Services as the TUI. Non-TTY stdout → JSON line
 | Command | Purpose |
 |---|---|
 | `pytheum` | launch TUI (alias for `pytheum ui`) |
-| `pytheum ui` | launch TUI explicitly |
+| `pytheum ui [--open <url\|ref>]` | launch TUI; `--open` jumps straight into the market detail screen for the resolved ref |
 | `pytheum search <query> [--venue ...] [--limit N]` | cross-venue search |
-| `pytheum open <url>` | resolve URL → market detail (TUI if TTY, JSON otherwise) |
+| `pytheum open <url-or-ref>` | resolve to a market, print a Rich detail view on TTY / JSON on pipe. **Never launches the TUI** — use `pytheum ui --open <url>` for that. |
 | `pytheum markets list [--venue ...] [--category ...] [--event ...] [--status ...] [--limit N]` | list markets |
 | `pytheum markets show <ticker-or-id>` | single market with freshness header |
 | `pytheum events list [--venue ...] [--category ...]` | list events |
@@ -818,6 +1144,8 @@ Exit code: `0` = all OK, `1` = any FAIL, `2` = WARN only.
 
 ## 14. Local paths
 
+v1 uses a single, explicitly hardcoded root: **`~/.pytheum/`** (`$HOME/.pytheum/` on macOS/Linux; `%USERPROFILE%\.pytheum\` on Windows). We deliberately do **not** use `platformdirs` — a developer CLI benefits from a predictable path you can `cd` into, and a `~/.pytheum/` dot-directory is the long-standing pattern for this class of tool (compare `~/.aws/`, `~/.gnupg/`, `~/.cargo/`). `platformdirs` is dropped from the runtime deps in §2.
+
 | Path | Purpose |
 |---|---|
 | `~/.pytheum/config.toml` | user config (see §6.1) |
@@ -827,7 +1155,7 @@ Exit code: `0` = all OK, `1` = any FAIL, `2` = WARN only.
 | `~/.pytheum/exports/` | default export destination |
 | `~/.pytheum/kalshi_private_key.pem` | optional — path is configurable |
 
-Paths use `platformdirs` for cross-platform correctness (`~/.pytheum/` on macOS/Linux; `%APPDATA%\Pytheum\` on Windows).
+Every path is overridable via `[storage]` in `config.toml`. Users who prefer XDG conventions can point each slot at `$XDG_CONFIG_HOME / $XDG_DATA_HOME` themselves.
 
 ---
 
@@ -875,10 +1203,14 @@ CI: every PR runs `uv sync && ruff check && mypy src && pytest --cov=pytheum`.
 
 ## 18. Glossary
 
-- **Venue:** one of `kalshi`, `polymarket`
+- **Venue:** one of `kalshi`, `polymarket`.
 - **Native ID:** the venue's primary identifier for a market (Kalshi `ticker`; Polymarket `conditionId`). Always preserved.
-- **Raw payload:** the exact JSON returned by the venue API/WS, stored in `raw_rest` or `raw_ws`.
+- **Outcome:** one side of a market (YES or NO, or a named outcome for extended types). Orderbooks, trades, and price points all attach to `(venue, market_native_id, outcome_id)`, not to the market as a whole. Polymarket outcomes carry a distinct `token_id`.
+- **MarketRef / EventRef:** typed reference used everywhere a market or event is named — URL resolver, CLI args, watchlist entries, TUI navigation, command palette. Has `venue`, `ref_type`, `value`, optional `outcome_id`.
+- **Raw payload:** the exact JSON returned by the venue API/WS, stored in `raw_rest` or `raw_ws`. Persistence is mandatory for any row that lands in a normalized table (no `persist_raw=False`).
 - **Schema version:** integer incremented whenever a normalizer's output shape changes. Every normalized row carries the version it was produced under.
+- **Price unit / size unit:** `PriceUnit` (`probability_1_0` / `cents_100` / `usdc`) and `SizeUnit` (`contracts` / `shares` / `usdc`). `price` on normalized rows is always `probability_1_0`; `native_price` preserves the venue's raw value.
 - **Freshness:** text-labeled state of a REST-derived display (`LIVE`, `REFRESHING`, `CACHED`, `STALE`, `FAILED`).
 - **Stream state:** text-labeled state of a WS subscription (`CONNECTING`, `LIVE`, `RECONNECTING`, `DISCONNECTED`, `FAILED`).
+- **Stale-cache-only:** a service return path where the network failed and the cached value is beyond its hard age limit. Delivered via the `StaleCacheOnly` exception carrying the cached value + its age, letting the caller decide whether to display.
 - **Plug-and-play seam:** the App Services layer — the only layer an alternative interface (collector, notebook, web UI) needs to depend on.
