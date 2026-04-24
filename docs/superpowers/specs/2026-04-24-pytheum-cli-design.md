@@ -45,7 +45,7 @@
   │  APP SERVICES                                                │
   │  ────────────                                                │
   │  BrowseService · SearchService · MarketSession ·             │
-  │  WatchlistService · URLResolverService · ExportService       │
+  │  WatchlistService · RefResolverService · ExportService       │
   └────────────────────────────┬─────────────────────────────────┘
                                │
   ┌────────────────────────────▼─────────────────────────────────┐
@@ -130,7 +130,7 @@ pytheum-cli/
 │   │   ├── search.py
 │   │   ├── market_session.py
 │   │   ├── watchlist.py
-│   │   ├── url_resolver.py
+│   │   ├── ref_resolver.py
 │   │   └── export.py
 │   ├── cli/                   # L5a Typer
 │   │   ├── __init__.py
@@ -262,7 +262,8 @@ If any of the six is missing for a given endpoint at the end of Phase 2, that en
 | `market` public | ✅ | subscribe by `asset_ids` (token_ids) — emits `book`, `price_change`, `last_trade_price`, `tick_size_change` |
 | `user` authenticated | ❌ stubbed in v1 (auth deferred) | |
 | Heartbeat | ✅ | server pings; client pongs; 30s timeout → reconnect |
-| Reconnect + gap | ✅ reconnect; gap detection via timestamp (no native seq #) | on reconnect → REST backfill: `GET /book?token_id=…` |
+| Reconnect | ✅ exponential backoff; full REST backfill on reconnect: `GET /book?token_id=…` for every active subscription | |
+| Reconciliation | ✅ periodic REST reconciliation (configurable interval) — no native sequence number means this is the only way to catch dropped messages | see §7 for the full contract |
 
 ### 3.7 URL resolution
 
@@ -283,7 +284,7 @@ If any of the six is missing for a given endpoint at the end of Phase 2, that en
 
 ### 4.1 Normalized models (pydantic v2)
 
-**Raw persistence is mandatory for any row in a normalized table.** Objects held in memory by the TTL cache may have `raw_id = None` (not persisted), but the `MarketRepository.upsert(...)` interface rejects any write without a matching `raw_id`. There is no `persist_raw=False` flag — if you want ephemeral data, use the cache, not the repository.
+**Raw persistence is mandatory for any row in a normalized table.** Every normalized row's `raw_id` points into the single `raw_payloads` table (§5.1) — a globally-unique identifier, no per-transport ambiguity. Objects held in memory by the TTL cache may have `raw_id = None` (not yet persisted), but `MarketRepository.upsert(...)` rejects any write without a matching `raw_id`. There is no `persist_raw=False` flag — if you want ephemeral data, use the cache, not the repository.
 
 **Outcomes are first-class.** Orderbooks, trades, and price points attach to `(venue, market_native_id, outcome_id)`, not to the market alone. Every binary market has exactly two Outcome rows; multi-outcome Polymarket events are still modelled as N sibling Markets (venue-native), but each of those Markets has two Outcomes (YES / NO tokens) with their own token_ids and per-side books.
 
@@ -320,7 +321,7 @@ class Event(BaseModel):
     native_id: str           # Kalshi event_ticker / Polymarket event id-or-slug
     title: str
     primary_category: Category | None
-    tags: list[Category] = []                 # Polymarket may have multiple
+    tags: list[Category] = Field(default_factory=list)   # Polymarket may have multiple
     closes_at: datetime | None
     market_count: int
     aggregate_volume: Decimal | None
@@ -455,23 +456,47 @@ class MarketRef(BaseModel):
     value: str
     outcome_id: str | None = None         # optional — points at a specific side
 
-    def canonical(self) -> "MarketRef":
-        """Return the ref_type this venue considers primary (KALSHI_TICKER or
-        POLYMARKET_CONDITION_ID), resolving slugs / URLs / token_ids via the
-        data layer as needed."""
-        ...
-
 class EventRef(BaseModel):
     venue: Venue
     ref_type: RefType
     value: str
 ```
 
+`MarketRef` / `EventRef` are **inert data objects** — pydantic models with no I/O methods. Any resolution (slug → condition_id, URL → MarketRef, token_id → condition_id) happens in **`RefResolverService`** at the App Services layer, which can reach repositories and venue clients as needed. This keeps the model free of layer violations.
+
+```python
+class RefResolverService(Protocol):
+    async def parse(self, raw: str) -> MarketRef | EventRef:
+        """Accept a URL, ticker, conditionId, token_id, or slug and return the
+        best ref. Raises MalformedURL / UnresolvedRef on ambiguity or failure."""
+
+    async def canonicalize(self, ref: MarketRef) -> MarketRef:
+        """Promote a ref to the venue's primary form: KALSHI_TICKER on Kalshi,
+        POLYMARKET_CONDITION_ID on Polymarket. May call the venue to resolve
+        slugs or token_ids to conditionId."""
+```
+
 CLI args that take a market accept any `RefType` and auto-detect via regex — `pytheum markets show FED-25DEC-T4.00` vs `pytheum markets show 0xabc…` vs `pytheum markets show --ref-type polymarket_market_slug fomc-dec-2025-cut-25bps`. Ambiguous input (e.g., a short token id) fails fast with a clear error listing the detected candidates.
 
-### 4.4 Service error types
+### 4.4 Service return type and error types
 
-All service-layer errors inherit from `PytheumError` and surface to the CLI / TUI with actionable messages.
+All App Services return a typed envelope, `ServiceResult[T]`, that carries the value **plus** a freshness label and an optional non-fatal warning. This avoids the "exception that also carries data" anti-pattern for the common stale-cache case: success paths and soft-failure paths use the same channel, and exceptions are reserved for hard failures that prevent returning anything.
+
+```python
+from typing import Generic, TypeVar
+T = TypeVar("T")
+
+@dataclass(frozen=True)
+class ServiceResult(Generic[T]):
+    value: T
+    freshness: DataFreshness           # LIVE | REFRESHING | CACHED | STALE | FAILED
+    warning: "PytheumError | None" = None   # non-fatal; caller decides whether to surface
+    age_s: float | None = None         # cache age when freshness is CACHED/STALE
+```
+
+**Stale-cache path:** when the network call fails and only a value past its hard TTL is available (§5.5), the service returns `ServiceResult(value=cached, freshness=STALE, warning=VenueUnavailable(...), age_s=...)`. The UI inspects `freshness` + `warning` and decides how to render (e.g., screen-level offline banner + per-pane `[STALE · 12m]` badge). **No separate `StaleCacheOnly` exception.**
+
+Hard failures (no cached value at all, protocol errors, auth missing for a required endpoint) still raise:
 
 ```python
 class PytheumError(Exception): ...
@@ -511,14 +536,9 @@ class UnsupportedEndpoint(PytheumError):
     venue: Venue
     endpoint: str
     reason: str            # e.g., "authenticated, deferred to v2"
-
-class StaleCacheOnly(PytheumError):
-    """Network path failed and cache returned data older than the
-    hard limit. Service returns the stale value + this exception so
-    callers can decide whether to display."""
-    cached_value: object
-    age_s: float
 ```
+
+`VenueUnavailable` is the only error that typically appears as a `ServiceResult.warning` (when it accompanies a stale-cache value); the others are raised.
 
 ---
 
@@ -526,53 +546,40 @@ class StaleCacheOnly(PytheumError):
 
 Single embedded file at `~/.pytheum/pytheum.duckdb`. **Raw first, normalized second.**
 
-### 5.1 Raw tables (append-only)
+### 5.1 Raw payloads (single append-only table)
 
-Explicit sequences; native `VARCHAR[]` for native IDs (DuckDB supports list types natively); no JSON-indexing dance.
+A **single** `raw_payloads` table with a `transport` column — not one table per transport. This gives every normalized row an unambiguous FK target (`raw_payloads.id` is globally unique) and lets queries span REST + WS without a UNION.
 
 ```sql
-CREATE SEQUENCE seq_raw_rest START 1;
-CREATE SEQUENCE seq_raw_ws   START 1;
+CREATE SEQUENCE seq_raw_payloads START 1;
 
-CREATE TABLE raw_rest (
-    id             BIGINT        PRIMARY KEY DEFAULT nextval('seq_raw_rest'),
+CREATE TABLE raw_payloads (
+    id             BIGINT        PRIMARY KEY DEFAULT nextval('seq_raw_payloads'),
     venue          VARCHAR       NOT NULL,
-    endpoint       VARCHAR       NOT NULL,       -- "kalshi:/markets/{ticker}"
-    request_params JSON,
+    transport      VARCHAR       NOT NULL,       -- 'rest' | 'ws'
+    endpoint       VARCHAR       NOT NULL,       -- REST path or WS channel
+    request_params JSON,                         -- REST query params / WS subscribe msg
     received_ts    TIMESTAMPTZ   NOT NULL,
     source_ts      TIMESTAMPTZ,
+    sequence_no    BIGINT,                       -- WS only (nullable for REST)
     schema_version INT           NOT NULL,
     native_ids     VARCHAR[]     NOT NULL DEFAULT [],
     payload        JSON          NOT NULL,
-    status_code    INT,
-    duration_ms    INT,
-    created_ts     TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
+    status_code    INT,                          -- REST only
+    duration_ms    INT,                          -- REST only
+    created_ts     TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (transport IN ('rest', 'ws'))
 );
-CREATE INDEX idx_raw_rest_venue_ep ON raw_rest(venue, endpoint, received_ts);
-
-CREATE TABLE raw_ws (
-    id             BIGINT        PRIMARY KEY DEFAULT nextval('seq_raw_ws'),
-    venue          VARCHAR       NOT NULL,
-    channel        VARCHAR       NOT NULL,       -- "kalshi:orderbook_delta"
-    subscription   JSON,
-    received_ts    TIMESTAMPTZ   NOT NULL,
-    source_ts      TIMESTAMPTZ,
-    sequence_no    BIGINT,                       -- nullable (Polymarket has none)
-    schema_version INT           NOT NULL,
-    native_ids     VARCHAR[]     NOT NULL DEFAULT [],
-    payload        JSON          NOT NULL,
-    created_ts     TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_raw_ws_venue_ch ON raw_ws(venue, channel, received_ts);
+CREATE INDEX idx_raw_venue_transport_ep ON raw_payloads(venue, transport, endpoint, received_ts);
 ```
 
 **Rule:** raw persistence is **mandatory for any data that becomes a normalized row**. Callers that want ephemeral read-through (e.g., a fast live tail) use the in-memory TTL cache and never touch the repository. There is no `persist_raw=False` flag — the two paths are separate code paths.
 
-Raw tables are **never deleted** by v1 code; rotation / pruning is a post-v1 decision.
+`raw_payloads` is **never deleted** by v1 code; rotation / pruning is a post-v1 decision.
 
 ### 5.2 Normalized tables
 
-`raw_id` is **NOT NULL** everywhere — the schema enforces the rule from §4.1. Migrations live in `src/pytheum/data/schema/` as numbered SQL files and run at startup.
+`raw_id` is **NOT NULL** everywhere — the schema enforces the rule from §4.1. Every `raw_id` column is a foreign key to `raw_payloads.id` (§5.1); for brevity the DDL below omits the `FOREIGN KEY (raw_id) REFERENCES raw_payloads(id)` clause on each table, but the implementation adds it to all of them. Migrations live in `src/pytheum/data/schema/` as numbered SQL files and run at startup.
 
 ```sql
 CREATE TABLE categories (
@@ -756,7 +763,8 @@ SELECT
     (SELECT list(a.alias)
        FROM market_aliases a
        WHERE a.venue = m.venue AND a.market_native_id = m.native_id) AS aliases,
-    -- concatenated blob for rapidfuzz / ILIKE
+    -- concatenated blob for rapidfuzz / ILIKE — must include every
+    -- field §8.1 claims is searchable, including list columns flattened
     concat_ws(' | ',
         m.venue,
         m.native_id,
@@ -764,8 +772,26 @@ SELECT
         coalesce(m.question, ''),
         coalesce(m.url, ''),
         coalesce(e.title, ''),
+        coalesce(e.url, ''),
         coalesce(c.native_label, ''),
-        coalesce(c.display_label, '')
+        coalesce(c.display_label, ''),
+        -- list columns flattened; NULL-safe via coalesce
+        coalesce(list_string_agg(
+            (SELECT list(o.token_id) FROM outcomes o
+              WHERE o.venue = m.venue AND o.market_native_id = m.native_id), ' '), ''),
+        coalesce(list_string_agg(
+            (SELECT list(o.label) FROM outcomes o
+              WHERE o.venue = m.venue AND o.market_native_id = m.native_id), ' '), ''),
+        coalesce(list_string_agg(
+            (SELECT list(tag_c.native_label)
+               FROM event_tags et
+               JOIN categories tag_c
+                 ON et.tag_venue = tag_c.venue AND et.tag_native_id = tag_c.native_id
+               WHERE et.event_venue = m.event_venue
+                 AND et.event_native_id = m.event_native_id), ' '), ''),
+        coalesce(list_string_agg(
+            (SELECT list(a.alias) FROM market_aliases a
+              WHERE a.venue = m.venue AND a.market_native_id = m.native_id), ' '), '')
     ) AS search_blob
 FROM markets m
 LEFT JOIN events e
@@ -802,7 +828,7 @@ The TTL cache sits between services and the repository; it never persists. These
 | Price history (per interval) | 5m | 1h |
 | Tags / search index rebuild | 15m | 1h |
 
-Once data crosses the stale-cache hard limit and the network path has failed, the service returns the last value alongside a `StaleCacheOnly` exception — the UI decides whether to show it. WS-backed data doesn't use these TTLs; it tracks `StreamState` directly.
+Once data crosses the stale-cache hard limit and the network path has failed, the service returns `ServiceResult(value=cached, freshness=STALE, warning=VenueUnavailable(...), age_s=…)` — the UI decides whether to show it (§4.4). WS-backed data doesn't use these TTLs; it tracks `StreamState` directly.
 
 TTLs are overridable via config:
 
@@ -865,7 +891,7 @@ Environment overrides via `PYTHEUM_*` prefix for non-secret fields: `PYTHEUM_VEN
 ### 6.2 v1 auth behavior
 
 - **Public mode (default):** nothing to configure. Every public endpoint listed in §3 works out of the box.
-- **Authenticated mode (reserved):** if `api_key` + `private_key_path` are set, Kalshi client attaches `KALSHI-ACCESS-KEY` / `KALSHI-ACCESS-SIGNATURE` / `KALSHI-ACCESS-TIMESTAMP` headers. The RSA-PSS signing code ships as a tested module (ported from algodawg patterns, rewritten) but no v1 user-facing command requires auth.
+- **Authenticated mode (reserved):** the Kalshi client, at startup, resolves the API key by reading `api_key_env_var` (an env var name) and fetching the private key from either `private_key_path` (filesystem PEM) or `private_key_keyring` (keyring service name). If any required secret is missing, the client raises `AuthRequired` only when a private endpoint is actually called — public endpoints remain available. When both are present, the client attaches `KALSHI-ACCESS-KEY` / `KALSHI-ACCESS-SIGNATURE` / `KALSHI-ACCESS-TIMESTAMP` headers. The RSA-PSS signing code ships as a tested module, but no v1 user-facing command requires auth.
 
 ### 6.3 Secrets handling
 
@@ -915,7 +941,7 @@ All WS clients implement this contract:
 | Heartbeat | respond to server ping with pong; client-side 45s idle watchdog — any frame received resets it, expiry forces reconnect (exact venue ping cadence verified empirically during implementation) | same client-side contract: respond to pings, 45s idle watchdog |
 | Reconnect policy | exponential backoff 1s → 30s, jitter ±20%, infinite retries; circuit breaker trips after 10 consecutive failures | same |
 | Subscription replay | on reconnect, re-send all active subscriptions before emitting LIVE | same |
-| Sequence-gap detection | `orderbook_delta.seq` — on gap → refetch full book via REST, emit `book_reset` event | no native seq — detect by `message_timestamp` regression; on gap → refetch via `GET /book` |
+| Sequence-gap detection | `orderbook_delta.seq` — deterministic. On gap → refetch full book via REST, emit `book_reset` event | **No deterministic gap detection** — Polymarket exposes no sequence number. Can detect out-of-order messages via timestamp regression (not missing ones). Strategy: periodic REST reconciliation (`GET /book` every N seconds per subscription, configurable), plus full REST backfill on every reconnect. Emit `book_reset` events from the reconciliation path. |
 | Per-channel error handling | a single channel's error or malformed frame does not tear down the session | same |
 | Freshness indicator | exposes `StreamState` per subscription | same |
 
@@ -944,7 +970,7 @@ Every market's `search_blob`, built at normalize time, contains: `title`, `quest
 
 ### 8.2 Query pipeline
 
-1. **Exact match** — URL paste, full ticker, full conditionId, full token_id → bypass search, route to `URLResolverService`.
+1. **Exact match** — URL paste, full ticker, full conditionId, full token_id → bypass search, route to `RefResolverService`.
 2. **Substring** — DuckDB `ILIKE` over `search_blob` (fast, deterministic).
 3. **Fuzzy** — rapidfuzz `token_set_ratio` over `search_blob`; threshold 70.
 4. **Merge and rank** — dedupe by `(venue, native_id)`; rank by: exact > substring > fuzzy score; within each tier sort by native volume desc.
@@ -990,8 +1016,9 @@ class EmbeddingAdapter(Protocol):
 |---|---|---|
 | `home` | `pytheum` start, or `esc` from any top-level screen | Mode selector: Kalshi / Polymarket / Search / Paste URL / Watchlist |
 | `explorer` | from `home` after venue pick | Miller columns: Categories → Events → Markets |
-| `market_detail` | from explorer / search / URL paste | Full market view: metadata + chart + orderbook + live trades |
+| `market_detail` | from explorer / search / watchlist / URL paste | Full market view: metadata + chart + orderbook + live trades |
 | `search` | `/` from home, or `:search <q>` anywhere | Flat cross-venue results with venue badges |
+| `watchlist` | Watchlist on `home`, or `:watch` anywhere | Saved markets from `~/.pytheum/watchlist.toml`; columns: venue, label, ticker/id, outcome, last-seen price, added. `enter` opens market_detail; `d` removes; `r` refreshes all; `s` from market_detail adds. Empty state: "No markets saved yet. Open any market and press `s` to save." |
 | `help` (overlay) | `?` anywhere | Full keymap with portable fallbacks |
 
 ### 11.2 Screen states
@@ -1086,20 +1113,24 @@ All commands call the same App Services as the TUI. Non-TTY stdout → JSON line
 
 | Command | Purpose |
 |---|---|
+Every `<market-ref>` / `<event-ref>` argument accepts any `RefType` (§4.3): ticker, conditionId, token_id, slug, or URL. `RefResolverService.parse()` disambiguates; ambiguous input fails with a listed-candidates error.
+
+| Command | Purpose |
+|---|---|
 | `pytheum` | launch TUI (alias for `pytheum ui`) |
-| `pytheum ui [--open <url\|ref>]` | launch TUI; `--open` jumps straight into the market detail screen for the resolved ref |
+| `pytheum ui [--open <market-ref>]` | launch TUI; `--open` jumps straight into the market detail screen for the resolved ref |
 | `pytheum search <query> [--venue ...] [--limit N]` | cross-venue search |
-| `pytheum open <url-or-ref>` | resolve to a market, print a Rich detail view on TTY / JSON on pipe. **Never launches the TUI** — use `pytheum ui --open <url>` for that. |
-| `pytheum markets list [--venue ...] [--category ...] [--event ...] [--status ...] [--limit N]` | list markets |
-| `pytheum markets show <ticker-or-id>` | single market with freshness header |
+| `pytheum open <market-ref>` | resolve ref, print a Rich detail view on TTY / JSON on pipe. **Never launches the TUI** — use `pytheum ui --open <ref>` for that. |
+| `pytheum markets list [--venue ...] [--category ...] [--event <event-ref>] [--status ...] [--limit N]` | list markets |
+| `pytheum markets show <market-ref> [--outcome <outcome-id>]` | single market with freshness header; `--outcome` narrows to one side |
 | `pytheum events list [--venue ...] [--category ...]` | list events |
-| `pytheum events show <event-id>` | single event with nested markets |
-| `pytheum trades tail <ticker> [--duration 5m]` | live WS tail; Ctrl-C to stop |
-| `pytheum trades history <ticker> [--from ...] [--to ...]` | historical trades |
-| `pytheum orderbook <ticker>` | snapshot |
-| `pytheum fetch market <ticker>` | REST-fetch + normalize + persist (no display) |
-| `pytheum export <scope> --format {parquet\|csv\|json} --out <path>` | scope: `market <id>` / `event <id>` / `search <query>` / `watchlist` |
-| `pytheum watch {add\|remove\|list} [<market>]` | watchlist ops |
+| `pytheum events show <event-ref>` | single event with nested markets |
+| `pytheum trades tail <market-ref> [--outcome <outcome-id>] [--duration 5m]` | live WS tail; Polymarket requires an outcome (token), Kalshi can tail either side or both; Ctrl-C to stop |
+| `pytheum trades history <market-ref> [--outcome <outcome-id>] [--from ...] [--to ...]` | historical trades |
+| `pytheum orderbook <market-ref> --outcome <outcome-id>` | per-side orderbook snapshot; **`--outcome` is required on Polymarket** (books are per-token); Kalshi defaults to rendering both sides |
+| `pytheum fetch market <market-ref>` | REST-fetch + normalize + persist (no display) |
+| `pytheum export <scope> --format {parquet\|csv\|json} --out <path>` | scope: `market <market-ref>` / `event <event-ref>` / `search <query>` / `watchlist` |
+| `pytheum watch {add\|remove\|list} [<market-ref>] [--outcome <outcome-id>]` | watchlist ops; `--outcome` pins a specific side |
 | `pytheum doctor` | health checks (see §13) |
 | `pytheum --version` | prints version |
 
@@ -1125,12 +1156,14 @@ pytheum doctor
 [OK]    Kalshi REST reachable (GET /series?limit=1 · 143ms)
 [OK]    Kalshi WS reachable (handshake OK · 201ms)
 [OK]    Polymarket Gamma reachable (GET /tags · 97ms)
-[OK]    Polymarket CLOB reachable (GET /tick-size?token_id=… · 112ms)
+[OK]    Polymarket CLOB reachable (GET /markets?limit=1 · 112ms)
 [OK]    Polymarket Data reachable (GET /live-volume · 88ms)
 [OK]    Polymarket WS reachable (handshake OK · 178ms)
 [OK]    Terminal: xterm-256color · truecolor · unicode
-[WARN]  Keyring backend unavailable — secrets will be read from config/env only
+[OK]    Keyring backend: macOS Keychain
 ```
+
+**Check design rule:** every check hits an endpoint that requires **no caller-provided dynamic parameters**. `GET /tick-size?token_id=…` is explicitly avoided because a live token id varies between runs — a doctor failure on that check would be indistinguishable from a real outage. Same reasoning behind `GET /markets?limit=1` (lists any one CLOB market) and `GET /live-volume` (takes no required filter).
 
 Exit code: `0` = all OK, `1` = any FAIL, `2` = WARN only.
 
@@ -1181,10 +1214,10 @@ CI: every PR runs `uv sync && ruff check && mypy src && pytest --cov=pytheum`.
 |---|---|---|
 | 1 · Foundation | repo scaffold (pyproject + uv + ruff + mypy + pytest), core primitives (config, clock, logging, rate_limit, retry, circuit_breaker, pagination), DuckDB schema + migrations, pydantic models | `pytheum doctor` runs (partial); unit tests pass |
 | 2 · Venue clients | Kalshi REST + WS with all endpoints in §3.1/3.2; Polymarket Gamma + CLOB + Data REST + WS with all endpoints in §3.3–3.6; URL resolvers; normalizers | fixture-based tests pass for every endpoint; recorded WS replay passes |
-| 3 · App services | BrowseService, SearchService, MarketSession, WatchlistService, URLResolverService, ExportService | service-level tests pass; CLI one-shots work end-to-end |
+| 3 · App services | BrowseService, SearchService, MarketSession, WatchlistService, RefResolverService, ExportService | service-level tests pass; CLI one-shots work end-to-end |
 | 4 · TUI | home, explorer, search, market detail, help overlay, command palette, footer, all screen states | snapshot tests per state; manual walkthrough of every keyboard action |
 | 5 · Hardening | fake venue server fixtures, schema-drift fixtures, accessibility pass (high-contrast theme, focus rings, text labels), packaging (`uv build`, entry points) | accessibility checklist green; `pip install .` works from a fresh venv |
-| 6 · Collector-ready | freshness tracking service, scheduled refresh contracts, replay-from-raw-logs tool | designed for — demonstration tool reads `raw_rest` + `raw_ws` and reconstructs normalized state; no daemon shipped |
+| 6 · Collector-ready | freshness tracking service, scheduled refresh contracts, replay-from-raw-logs tool | designed for — demonstration tool reads `raw_payloads` (filtered by transport) and reconstructs normalized state; no daemon shipped |
 
 ---
 
@@ -1207,10 +1240,10 @@ CI: every PR runs `uv sync && ruff check && mypy src && pytest --cov=pytheum`.
 - **Native ID:** the venue's primary identifier for a market (Kalshi `ticker`; Polymarket `conditionId`). Always preserved.
 - **Outcome:** one side of a market (YES or NO, or a named outcome for extended types). Orderbooks, trades, and price points all attach to `(venue, market_native_id, outcome_id)`, not to the market as a whole. Polymarket outcomes carry a distinct `token_id`.
 - **MarketRef / EventRef:** typed reference used everywhere a market or event is named — URL resolver, CLI args, watchlist entries, TUI navigation, command palette. Has `venue`, `ref_type`, `value`, optional `outcome_id`.
-- **Raw payload:** the exact JSON returned by the venue API/WS, stored in `raw_rest` or `raw_ws`. Persistence is mandatory for any row that lands in a normalized table (no `persist_raw=False`).
+- **Raw payload:** the exact JSON returned by the venue API/WS, stored in the single `raw_payloads` table (distinguished by the `transport` column). Persistence is mandatory for any row that lands in a normalized table (no `persist_raw=False`).
 - **Schema version:** integer incremented whenever a normalizer's output shape changes. Every normalized row carries the version it was produced under.
 - **Price unit / size unit:** `PriceUnit` (`probability_1_0` / `cents_100` / `usdc`) and `SizeUnit` (`contracts` / `shares` / `usdc`). `price` on normalized rows is always `probability_1_0`; `native_price` preserves the venue's raw value.
 - **Freshness:** text-labeled state of a REST-derived display (`LIVE`, `REFRESHING`, `CACHED`, `STALE`, `FAILED`).
 - **Stream state:** text-labeled state of a WS subscription (`CONNECTING`, `LIVE`, `RECONNECTING`, `DISCONNECTED`, `FAILED`).
-- **Stale-cache-only:** a service return path where the network failed and the cached value is beyond its hard age limit. Delivered via the `StaleCacheOnly` exception carrying the cached value + its age, letting the caller decide whether to display.
+- **ServiceResult:** the typed return envelope from every App Service: `value + freshness + warning? + age_s?`. Lets callers distinguish LIVE / CACHED / STALE / FAILED without raising an exception that also carries data. `ServiceResult(freshness=STALE, warning=VenueUnavailable(…))` is the "stale-cache-only" path.
 - **Plug-and-play seam:** the App Services layer — the only layer an alternative interface (collector, notebook, web UI) needs to depend on.
