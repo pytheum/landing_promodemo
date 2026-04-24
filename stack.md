@@ -1,4 +1,4 @@
-# Ephemeris — Asset & Demo Stack
+# Pytheum — Asset & Demo Stack
 
 One-time YC application sprint: shoot a demo video and capture landing-page assets from the existing HTML prototypes. The workbench demo is a **vision artifact**, not a live product — full data collection hasn't started. Voiceover should note this honestly.
 
@@ -22,7 +22,7 @@ Alternative if not on Mac: **Tella** ($20/mo) — cross-platform.
 - **Playwright** (free) — script pixel-perfect 1440×900 / 1728×1080 captures of both HTML files. Reproducible.
 
 ### Landing page imagery
-- **Ideogram 2.0** ($8–20/mo) — OG hero with Ephemeris wordmark. Better than Midjourney/DALL-E for typography.
+- **Ideogram 2.0** ($8–20/mo) — OG hero with Pytheum wordmark. Better than Midjourney/DALL-E for typography.
 - **Satori** (free, Vercel) — JSX → PNG for per-page OG images if we want programmatic.
 - **Lucide Icons** (free) — already fintech-appropriate, matches Linear/Vercel/Supabase aesthetic.
 
@@ -45,7 +45,7 @@ Alternative if not on Mac: **Tella** ($20/mo) — cross-platform.
 8. Switch category to Sports or Esports — show kind-specific context pane.
 9. End on the latency pip + status bar ("wire→disk 318ms").
 
-**Voiceover opener:** "Ephemeris is what a Bloomberg Terminal for prediction markets looks like. Here's the workbench we've built; full archive begins [month]."
+**Voiceover opener:** "Pytheum is what a Bloomberg Terminal for prediction markets looks like. Here's the workbench we've built; full archive begins [month]."
 
 **Landing captures:**
 - Full-page scroll screenshot at 1440px (hero → stats → ASCII → thesis → coverage → FAQ → end CTA).

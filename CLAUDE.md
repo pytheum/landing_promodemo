@@ -1,4 +1,4 @@
-# Ephemeris — Workbench Prototype
+# Pytheum — Workbench Prototype
 
 Bloomberg Terminal for prediction markets (Kalshi + Polymarket). This repo holds the **vision prototype** for the YC application — landing page + interactive workbench UI. Full data collection has **not** started; everything shown is illustrative.
 

@@ -1,6 +1,6 @@
 /* ================================================================
    context-kinds.js
-   Type-aware context pane for the Ephemeris workbench.
+   Type-aware context pane for the Pytheum workbench.
 
    Exposes window.ContextKinds.render(kind, cursorIdx, { N })
    which returns HTML for the right pane. The main workbench file

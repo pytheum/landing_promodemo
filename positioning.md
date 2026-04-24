@@ -1,4 +1,4 @@
-# Ephemeris — Positioning & Competitive Landscape
+# Pytheum — Positioning & Competitive Landscape
 
 ## Current framing (working)
 
@@ -54,7 +54,7 @@ Partial analogs exist. Nobody does the combination (prediction markets + multi-s
 
 ## One-line pitch variations
 
-- Full: "Ephemeris is the Bloomberg Terminal for prediction markets — every tick, every surrounding signal, archived in real time."
+- Full: "Pytheum is the Bloomberg Terminal for prediction markets — every tick, every surrounding signal, archived in real time."
 - Short: "Bloomberg Terminal for prediction markets."
 - Dev/engineer: "Timestamped tick archive for Kalshi and Polymarket, joined to the news, social, polling, and telemetry around each tick."
 - Investor (moat-first): "The archive nobody is keeping. Every day it runs, it becomes harder to replicate."
@@ -63,7 +63,7 @@ Partial analogs exist. Nobody does the combination (prediction markets + multi-s
 
 When asked "who are your competitors?":
 
-> "TradingView Replay × Bloomberg event studies × prediction markets. No product combines the three for this asset class. TradingView is the UX cousin. Bloomberg is the analytical cousin. Ephemeris is the only one that fuses them for event contracts."
+> "TradingView Replay × Bloomberg event studies × prediction markets. No product combines the three for this asset class. TradingView is the UX cousin. Bloomberg is the analytical cousin. Pytheum is the only one that fuses them for event contracts."
 
 When asked "why hasn't Bloomberg built this?":
 
