@@ -53,6 +53,7 @@ pytheum-cli/
 │       │   ├── refs.py
 │       │   ├── storage.py
 │       │   └── schema/
+│       │       ├── __init__.py
 │       │       ├── 001_raw_payloads.sql
 │       │       ├── 002_categories_events.sql
 │       │       ├── 003_markets_outcomes.sql
@@ -139,10 +140,11 @@ build/
 .env.*
 !.env.example
 
-# Pytheum local data
+# Pytheum local artefacts ever created inside the repo
+# (the real store lives at ~/.pytheum/, outside the repo; these patterns only
+#  protect against stray local files during tests / manual experiments)
 *.duckdb
 *.duckdb.wal
-/home/.pytheum/
 ```
 
 - [ ] **Step 3: Create `LICENSE` (MIT)**
@@ -269,6 +271,22 @@ python_version = "3.12"
 strict = true
 files = ["src/pytheum"]
 
+# Third-party libraries that ship incomplete or no type stubs. Restricted per
+# module so strict typing still applies to our own code. Revisit each time
+# these deps are upgraded — several of them gain stubs over time.
+[[tool.mypy.overrides]]
+module = [
+    "duckdb",
+    "duckdb.*",
+    "keyring",
+    "keyring.*",
+    "structlog",
+    "structlog.*",
+    "rapidfuzz",
+    "rapidfuzz.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -341,6 +359,12 @@ Write `src/pytheum/data/__init__.py`:
 
 ```python
 """Normalized data models, storage, and repository."""
+```
+
+Write `src/pytheum/data/schema/__init__.py`:
+
+```python
+"""SQL migration files loaded via importlib.resources."""
 ```
 
 Write `src/pytheum/cli/__init__.py`:
@@ -2382,19 +2406,33 @@ git -c user.name="Konstantinos Anagnostopoulos" \
 - Modify: `src/pytheum/data/models.py:1-…` (append entity models to existing file)
 - Modify: `tests/data/test_models.py` (append entity-model tests)
 
-- [ ] **Step 1: Write the failing test** — append to `tests/data/test_models.py`
+- [ ] **Step 1: Update `tests/data/test_models.py`**
 
-Append (after existing enum tests):
+Replace the **top import block** (imports only — leave existing test functions unchanged) with:
 
 ```python
+from __future__ import annotations
+
 from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
 
-from pytheum.data.models import Category, Event, Market, Outcome
+from pytheum.data.models import (
+    Category,
+    Event,
+    Market,
+    Outcome,
+    PriceUnit,
+    SizeUnit,
+    Venue,
+    VolumeMetric,
+)
+```
 
+Then **append the new test functions** (no new imports) at the end of the file:
 
+```python
 def test_category_minimal() -> None:
     c = Category(
         venue=Venue.KALSHI,
@@ -2619,16 +2657,37 @@ git -c user.name="Konstantinos Anagnostopoulos" \
 - Modify: `src/pytheum/data/models.py` (append)
 - Modify: `tests/data/test_models.py` (append)
 
-- [ ] **Step 1: Append failing tests**
+- [ ] **Step 1: Update `tests/data/test_models.py`**
 
-Append to `tests/data/test_models.py`:
+Extend the **top import block** to include `OrderBook`, `PricePoint`, `Trade` and the `datetime` imports. The file's top block should now look like:
 
 ```python
+from __future__ import annotations
+
 from datetime import UTC, datetime
+from decimal import Decimal
 
-from pytheum.data.models import OrderBook, PricePoint, SizeUnit, Trade
+import pytest
+from pydantic import ValidationError
 
+from pytheum.data.models import (
+    Category,
+    Event,
+    Market,
+    OrderBook,
+    Outcome,
+    PricePoint,
+    PriceUnit,
+    SizeUnit,
+    Trade,
+    Venue,
+    VolumeMetric,
+)
+```
 
+Then **append the new test functions** (no new imports) at the end of the file:
+
+```python
 def test_trade_requires_outcome_and_units() -> None:
     t = Trade(
         venue=Venue.KALSHI,
@@ -3049,14 +3108,9 @@ LEFT JOIN categories c
 
 Note: spec §5.3 shows `list_string_agg(...)` which is not a DuckDB built-in; the implementation uses `array_to_string(...)` which is the correct DuckDB function. This file is the source of truth — update the spec if the two ever diverge.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Do NOT commit yet**
 
-```bash
-git add src/pytheum/data/schema/
-git -c user.name="Konstantinos Anagnostopoulos" \
-    -c user.email="147280494+konstantinosanagn@users.noreply.github.com" \
-    commit -m "data: add DuckDB schema SQL files (raw_payloads + normalized + view)"
-```
+These SQL files are untested in isolation. Task 17 writes the DDL execution + search-view behaviour tests, runs them against these schema files, and produces the combined commit only after all tests pass. If the tests fail, fix the SQL *before* committing.
 
 ---
 
@@ -3178,6 +3232,133 @@ def test_fk_violation_raises(tmp_path: Path) -> None:
                 VALUES ('kalshi', 'X', 'X', 'X', 999, 1, CURRENT_TIMESTAMP)
                 """
             )
+
+
+def _seed_full_chain(conn: duckdb.DuckDBPyConnection) -> None:
+    """Insert a minimal Kalshi + Polymarket dataset for the search-view test."""
+    # One raw payload per logical row; we reuse an id for simplicity.
+    raw_id = conn.execute(
+        """
+        INSERT INTO raw_payloads (venue, transport, endpoint, received_ts,
+                                   schema_version, payload)
+        VALUES ('polymarket', 'rest', '/events', CURRENT_TIMESTAMP, 1, '{}')
+        RETURNING id
+        """
+    ).fetchone()
+    assert raw_id is not None
+    rid = raw_id[0]
+
+    conn.execute(
+        """
+        INSERT INTO categories (venue, native_id, native_label, display_label,
+                                 raw_id, schema_version, updated_ts)
+        VALUES ('polymarket', 'politics', 'Politics', 'Politics', ?, 1, CURRENT_TIMESTAMP)
+        """,
+        [rid],
+    )
+    conn.execute(
+        """
+        INSERT INTO events (venue, native_id, title,
+                             primary_category_venue, primary_category_native_id,
+                             closes_at, market_count, aggregate_volume,
+                             volume_metric, url, raw_id, schema_version, updated_ts)
+        VALUES ('polymarket', 'nyc-mayor-2026', 'NYC Mayor 2026',
+                 'polymarket', 'politics',
+                 NULL, 3, 4200.0,
+                 'usd_total', 'https://polymarket.com/event/nyc-mayor-2026',
+                 ?, 1, CURRENT_TIMESTAMP)
+        """,
+        [rid],
+    )
+    conn.execute(
+        """
+        INSERT INTO markets (venue, native_id, event_venue, event_native_id,
+                              title, question, status,
+                              total_volume, volume_metric, open_interest, liquidity,
+                              closes_at, url, raw_id, schema_version, updated_ts)
+        VALUES ('polymarket', 'adams-wins', 'polymarket', 'nyc-mayor-2026',
+                 'Eric Adams wins', 'Will Eric Adams win NYC Mayor 2026?', 'open',
+                 3100.0, 'usd_24h', NULL, NULL,
+                 NULL, 'https://polymarket.com/event/nyc-mayor-2026/adams-wins',
+                 ?, 1, CURRENT_TIMESTAMP)
+        """,
+        [rid],
+    )
+    for outcome_id, token, label in [
+        ("token_yes_001", "token_yes_001", "YES"),
+        ("token_no_002", "token_no_002", "NO"),
+    ]:
+        conn.execute(
+            """
+            INSERT INTO outcomes (venue, market_native_id, outcome_id, token_id, label,
+                                   price, native_price, price_unit,
+                                   volume, volume_metric,
+                                   raw_id, schema_version, updated_ts)
+            VALUES ('polymarket', 'adams-wins', ?, ?, ?,
+                    0.24, 0.24, 'usdc',
+                    NULL, 'unknown',
+                    ?, 1, CURRENT_TIMESTAMP)
+            """,
+            [outcome_id, token, label, rid],
+        )
+    # tag
+    conn.execute(
+        """
+        INSERT INTO categories (venue, native_id, native_label, display_label,
+                                 raw_id, schema_version, updated_ts)
+        VALUES ('polymarket', 'us-elections', 'us-elections', 'US Elections',
+                ?, 1, CURRENT_TIMESTAMP)
+        """,
+        [rid],
+    )
+    conn.execute(
+        """
+        INSERT INTO event_tags (event_venue, event_native_id, tag_venue, tag_native_id)
+        VALUES ('polymarket', 'nyc-mayor-2026', 'polymarket', 'us-elections')
+        """
+    )
+    # alias
+    conn.execute(
+        """
+        INSERT INTO market_aliases (venue, market_native_id, alias, source)
+        VALUES ('polymarket', 'adams-wins', 'eric adams mayor', 'user')
+        """
+    )
+
+
+def test_search_blob_contains_every_promised_field(tmp_path: Path) -> None:
+    """The search view's search_blob MUST include: title, question, url,
+    event_title, primary category label, token_ids, outcome labels,
+    event tags, and aliases. Anything missing breaks spec §8.1."""
+    db_path = tmp_path / "test.duckdb"
+    storage = Storage(db_path)
+    storage.migrate()
+    with storage.connect() as conn:
+        _seed_full_chain(conn)
+        row = conn.execute(
+            """
+            SELECT search_blob
+            FROM searchable_markets
+            WHERE venue = 'polymarket' AND native_id = 'adams-wins'
+            """
+        ).fetchone()
+    assert row is not None
+    blob = row[0]
+    for needle in (
+        "Eric Adams wins",               # market title
+        "Will Eric Adams win NYC",       # question
+        "polymarket.com/event/nyc-mayor-2026/adams-wins",  # market url
+        "NYC Mayor 2026",                # event title
+        "Politics",                      # primary category display label
+        "politics",                      # primary category native label
+        "token_yes_001",                 # token id
+        "token_no_002",                  # token id
+        "YES",                           # outcome label
+        "NO",                            # outcome label
+        "us-elections",                  # event tag
+        "eric adams mayor",              # alias
+    ):
+        assert needle in blob, f"search_blob missing {needle!r}\nblob was: {blob!r}"
 ```
 
 - [ ] **Step 2: Run test, verify it fails**
@@ -3270,13 +3451,18 @@ uv run pytest tests/data/test_storage.py -v
 
 Expected: all 6 tests pass. If `test_fk_violation_raises` fails because DuckDB doesn't enforce FKs by default, replace that test body with a skip: `pytest.skip("DuckDB doesn't enforce FKs at insert time in this version")` and document the limitation — but first try upgrading `duckdb` in `pyproject.toml` to the latest.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Commit schema + storage + tests together**
+
+The SQL files written in Task 16 were intentionally held back until now. This commit includes them alongside the migration runner and DDL + search-view behaviour tests, so the repo history never contains untested DDL.
 
 ```bash
-git add src/pytheum/data/storage.py tests/data/test_storage.py pyproject.toml
+git add src/pytheum/data/schema/ \
+        src/pytheum/data/storage.py \
+        tests/data/test_storage.py \
+        pyproject.toml
 git -c user.name="Konstantinos Anagnostopoulos" \
     -c user.email="147280494+konstantinosanagn@users.noreply.github.com" \
-    commit -m "data: add Storage wrapper + migration runner + DDL execution test"
+    commit -m "data: add DuckDB schema + migration runner + DDL/search-view tests"
 ```
 
 ---
@@ -3328,6 +3514,24 @@ def test_doctor_exit_zero_in_clean_env(tmp_path: Path, monkeypatch: pytest.Monke
     # Tolerate exit 2 (WARN only) but never FAIL.
     assert result.exit_code in (0, 2)
     assert "[FAIL]" not in result.output
+
+
+def test_doctor_fails_when_config_file_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing but malformed config.toml must produce [FAIL] Config file and exit != 0, 2.
+    This guards against config errors going silent."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pytheum_dir = tmp_path / ".pytheum"
+    pytheum_dir.mkdir()
+    # Raw-secret rejection is a ConfigError path; use it to force a FAIL.
+    (pytheum_dir / "config.toml").write_text(
+        '[venues.polymarket]\nsigner_private_key = "0xdeadbeef"\n'
+    )
+    result = runner.invoke(app, ["doctor"])
+    assert "[FAIL]" in result.output
+    assert "Config file" in result.output
+    assert result.exit_code == 1
 ```
 
 - [ ] **Step 2: Run test, verify it fails**
@@ -3359,12 +3563,13 @@ import duckdb
 import typer
 from rich.console import Console
 
-from pytheum.core.config import Config, load_config
+from pytheum.core.config import Config, ConfigError, load_config
 from pytheum.data.storage import Storage
 
 console = Console()
 
 MIN_PY = (3, 12)
+_EXPECTED_CONFIG_PATH = Path.home() / ".pytheum" / "config.toml"
 
 
 @dataclass
@@ -3372,6 +3577,23 @@ class Check:
     label: str
     status: str   # "OK" | "WARN" | "FAIL"
     detail: str = ""
+
+
+def _resolve_config() -> tuple[Check, Config | None]:
+    """Try to load the config from the canonical path. Return (check, cfg-or-None).
+
+    If the file exists but is invalid (malformed TOML, raw-secret rejection),
+    emit a FAIL check and return None — doctor still continues so other
+    checks run, but the exit code will be non-zero.
+    """
+    if not _EXPECTED_CONFIG_PATH.exists():
+        cfg = load_config(config_path=None)
+        return Check("Config file", "WARN", f"{_EXPECTED_CONFIG_PATH} not present — using defaults"), cfg
+    try:
+        cfg = load_config(config_path=_EXPECTED_CONFIG_PATH)
+    except ConfigError as e:
+        return Check("Config file", "FAIL", f"{_EXPECTED_CONFIG_PATH}: {e}"), None
+    return Check("Config file", "OK", str(_EXPECTED_CONFIG_PATH)), cfg
 
 
 def _check_python() -> Check:
@@ -3391,14 +3613,6 @@ def _check_duckdb(cfg: Config) -> Check:
         return Check("DuckDB", "FAIL", f"file {path}: {e}")
     size = path.stat().st_size if path.exists() else 0
     return Check("DuckDB", "OK", f"{duckdb.__version__} · file {path} ({size} bytes)")
-
-
-def _check_config_file(cfg: Config) -> Check:
-    # Config loaded with no TOML → that's fine, defaults apply. Report the expected location.
-    expected = Path.home() / ".pytheum" / "config.toml"
-    if expected.exists():
-        return Check("Config file", "OK", f"{expected}")
-    return Check("Config file", "WARN", f"{expected} not present — using defaults")
 
 
 def _check_logs_dir(cfg: Config) -> Check:
@@ -3434,13 +3648,16 @@ def _symbol(status: str) -> str:
 
 def doctor_cmd() -> None:
     """Run health checks against Pytheum's local environment."""
-    cfg = load_config(config_path=None)
+    config_check, cfg = _resolve_config()
+    # If the real config failed to load, fall back to in-memory defaults so
+    # downstream checks (duckdb path, logs dir) still report useful results.
+    effective_cfg = cfg if cfg is not None else load_config(config_path=None)
 
     checks: list[Check] = [
         _check_python(),
-        _check_duckdb(cfg),
-        _check_config_file(cfg),
-        _check_logs_dir(cfg),
+        config_check,
+        _check_duckdb(effective_cfg),
+        _check_logs_dir(effective_cfg),
         _check_terminal(),
         _check_keyring(),
     ]
