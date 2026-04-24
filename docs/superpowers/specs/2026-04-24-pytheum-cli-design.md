@@ -152,6 +152,7 @@ pytheum-cli/
 │       │   ├── explorer.py
 │       │   ├── market_detail.py
 │       │   ├── search.py
+│       │   ├── watchlist.py
 │       │   └── help.py
 │       ├── widgets/
 │       │   ├── chart.py
@@ -579,7 +580,13 @@ CREATE INDEX idx_raw_venue_transport_ep ON raw_payloads(venue, transport, endpoi
 
 ### 5.2 Normalized tables
 
-`raw_id` is **NOT NULL** everywhere — the schema enforces the rule from §4.1. Every `raw_id` column is a foreign key to `raw_payloads.id` (§5.1); for brevity the DDL below omits the `FOREIGN KEY (raw_id) REFERENCES raw_payloads(id)` clause on each table, but the implementation adds it to all of them. Migrations live in `src/pytheum/data/schema/` as numbered SQL files and run at startup.
+**Provenance rule.** All **venue-derived entity/fact tables** (`categories`, `events`, `markets`, `outcomes`, `trades`, `orderbook_snaps`, `price_points`) include `raw_id BIGINT NOT NULL` as a foreign key into `raw_payloads.id` (§5.1). For brevity the DDL below omits the `FOREIGN KEY (raw_id) REFERENCES raw_payloads(id)` clause on each of these tables, but the implementation adds it to all of them.
+
+**Exceptions** — two tables document their source differently:
+- **`event_tags`** is a derived join table; its provenance is the `raw_id` on the parent `events` row (and on the `categories` rows it links to). No separate `raw_id` column.
+- **`market_aliases`** carries user-authored or heuristic entries, not venue payloads. Its `source` column (`"user" | "heuristic" | "venue"`) documents the origin instead.
+
+Migrations live in `src/pytheum/data/schema/` as numbered SQL files and run at startup.
 
 ```sql
 CREATE TABLE categories (
@@ -1109,11 +1116,7 @@ Tab-completion supported. v1 commands:
 
 ## 12. Scriptable CLI commands
 
-All commands call the same App Services as the TUI. Non-TTY stdout → JSON lines; TTY stdout → Rich-rendered table.
-
-| Command | Purpose |
-|---|---|
-Every `<market-ref>` / `<event-ref>` argument accepts any `RefType` (§4.3): ticker, conditionId, token_id, slug, or URL. `RefResolverService.parse()` disambiguates; ambiguous input fails with a listed-candidates error.
+All commands call the same App Services as the TUI. Non-TTY stdout → JSON lines; TTY stdout → Rich-rendered table. Every `<market-ref>` / `<event-ref>` argument accepts any `RefType` (§4.3): ticker, conditionId, token_id, slug, or URL. `RefResolverService.parse()` disambiguates; ambiguous input fails with a listed-candidates error.
 
 | Command | Purpose |
 |---|---|
@@ -1212,10 +1215,10 @@ CI: every PR runs `uv sync && ruff check && mypy src && pytest --cov=pytheum`.
 
 | Phase | Scope | Definition of done |
 |---|---|---|
-| 1 · Foundation | repo scaffold (pyproject + uv + ruff + mypy + pytest), core primitives (config, clock, logging, rate_limit, retry, circuit_breaker, pagination), DuckDB schema + migrations, pydantic models | `pytheum doctor` runs (partial); unit tests pass |
-| 2 · Venue clients | Kalshi REST + WS with all endpoints in §3.1/3.2; Polymarket Gamma + CLOB + Data REST + WS with all endpoints in §3.3–3.6; URL resolvers; normalizers | fixture-based tests pass for every endpoint; recorded WS replay passes |
+| 1 · Foundation | repo scaffold (pyproject + uv + ruff + mypy + pytest), core primitives (config, clock, logging, rate_limit, retry, circuit_breaker, pagination), DuckDB schema + migrations, pydantic models | `pytheum doctor` runs (partial); unit tests pass; **DDL execution test** runs every migration + view against a fresh DuckDB and asserts success (catches syntax drift e.g. in the search view's `list_string_agg`) |
+| 2 · Venue clients | Kalshi REST + WS with all endpoints in §3.1/3.2; Polymarket Gamma + CLOB + Data REST + WS with all endpoints in §3.3–3.6; ref resolvers; normalizers | fixture-based tests pass for every endpoint; recorded WS replay passes; **every schema file under `data/schema/` has a corresponding "execute-and-inspect" test** |
 | 3 · App services | BrowseService, SearchService, MarketSession, WatchlistService, RefResolverService, ExportService | service-level tests pass; CLI one-shots work end-to-end |
-| 4 · TUI | home, explorer, search, market detail, help overlay, command palette, footer, all screen states | snapshot tests per state; manual walkthrough of every keyboard action |
+| 4 · TUI | home, explorer, search, market detail, **watchlist**, help overlay, command palette, footer, all screen states | snapshot tests per state (including watchlist empty/loaded); manual walkthrough of every keyboard action |
 | 5 · Hardening | fake venue server fixtures, schema-drift fixtures, accessibility pass (high-contrast theme, focus rings, text labels), packaging (`uv build`, entry points) | accessibility checklist green; `pip install .` works from a fresh venv |
 | 6 · Collector-ready | freshness tracking service, scheduled refresh contracts, replay-from-raw-logs tool | designed for — demonstration tool reads `raw_payloads` (filtered by transport) and reconstructs normalized state; no daemon shipped |
 
