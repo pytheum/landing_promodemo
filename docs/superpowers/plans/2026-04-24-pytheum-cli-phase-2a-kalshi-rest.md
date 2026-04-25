@@ -2131,7 +2131,7 @@ class KalshiRest:
         path: str,
         *,
         params: dict[str, Any] | None,
-        native_ids: Sequence[str],
+        native_ids: Sequence[str] = (),
     ) -> tuple[Any, RawEnvelope]:
         """Inner implementation of _send (wrapped by retry in __init__).
 
@@ -2265,13 +2265,13 @@ class KalshiClient:
 
     def __init__(
         self,
-        config: KalshiConfig,
+        config: KalshiConfig | None = None,
         *,
         signer: KalshiSigner | None = None,
         _transport: httpx.AsyncBaseTransport | None = None,
         _clock: Clock | None = None,
     ) -> None:
-        self.config = config
+        self.config = config or KalshiConfig()
         self._clock = _clock or SystemClock()
         base_url = getattr(config, "base_url", _BASE_URL) or _BASE_URL
         self._http = httpx.AsyncClient(
@@ -2496,10 +2496,10 @@ class TestNormalizeSeriesToCategories:
 
 class TestNormalizeEvent:
     def test_happy_path(self):
-        event = N.normalize_event(_event_payload(), raw_id=2)
+        event = N.normalize_event(_event_payload()["event"], raw_id=2)
         assert event.native_id == "KXINFL-25JAN"
         assert event.title == "CPI Jan 2025"
-        assert event.status == "open"
+        assert event.market_count >= 0  # Event has no .status field
 
     def test_schema_drift_on_missing_event_key(self):
         bad = {"not_event": {}}
@@ -2718,7 +2718,6 @@ def normalize_series_to_categories(
                 native_id=s["ticker"],
                 native_label=s.get("title") or s["ticker"],
                 display_label=s.get("category") or s.get("title") or s["ticker"],
-                raw_id=raw_id,
             )
             for s in series_list
         ]
@@ -2731,32 +2730,89 @@ def normalize_series_to_categories(
         ) from exc
 
 
-def normalize_event(
-    payload: dict[str, Any],
-    *,
-    raw_id: int | None = None,
-) -> Event:
-    """Normalise a ``GET /events/{event_ticker}`` response into an :class:`Event`."""
+def normalize_series(raw: dict[str, Any], *, raw_id: int) -> Category:
+    """Normalize a single raw Kalshi series dict into a :class:`Category` model.
+
+    Kalshi series are category buckets: each has a ticker (e.g. "KXBTC"),
+    a title (e.g. "Bitcoin"), and a category string (e.g. "Crypto").
+    We map:
+        native_id    = series["ticker"]
+        native_label = series["title"]     (or ticker if title absent)
+        display_label = series.get("category") or series["title"]
+
+    Raises :class:`SchemaDrift` if required fields are missing.
+    """
     try:
-        block: dict[str, Any] = payload["event"]
+        ticker = raw["ticker"]
+        title = raw.get("title") or ticker
+        category_label = raw.get("category") or title
+        return Category(
+            venue=Venue.KALSHI,
+            native_id=ticker,
+            native_label=title,
+            display_label=category_label,
+        )
+    except (KeyError, ValidationError) as exc:
+        raise SchemaDrift(
+            venue=Venue.KALSHI,
+            endpoint="/series",
+            raw_id=raw_id,
+            validator_errors=[str(exc)],
+        ) from exc
+
+
+def normalize_event(
+    raw: dict[str, Any],
+    *,
+    raw_id: int,
+) -> Event:
+    """Normalise a single Kalshi event dict into an :class:`Event`.
+
+    Accepts either a bare event dict (from a list response) or the inner
+    ``payload["event"]`` dict from a detail response.
+
+    Mapping: event_ticker→native_id, series_ticker→primary_category,
+    close_time→closes_at, markets_count→market_count, volume→aggregate_volume.
+    """
+    try:
+        ticker = raw["event_ticker"]
+        series_ticker = raw.get("series_ticker") or raw.get("category", "")
+        primary_category: Category | None = (
+            Category(
+                venue=Venue.KALSHI,
+                native_id=series_ticker,
+                native_label=series_ticker,
+                display_label=series_ticker,
+            )
+            if series_ticker else None
+        )
+        closes_at_raw = raw.get("close_time") or raw.get("closes_at")
+        closes_at: datetime | None = (
+            datetime.fromisoformat(closes_at_raw.rstrip("Z")).replace(tzinfo=UTC)
+            if closes_at_raw else None
+        )
+        volume_raw = raw.get("volume") or raw.get("dollar_volume")
         return Event(
             venue=Venue.KALSHI,
-            native_id=block["event_ticker"],
-            title=block.get("title", ""),
-            primary_category=None,
+            native_id=ticker,
+            title=raw.get("title") or ticker,
+            primary_category=primary_category,
             tags=[],
-            market_count=block.get("markets_count") or block.get("market_count") or 0,
-            aggregate_volume=None,
-            volume_metric=VolumeMetric.UNKNOWN,
-            closes_at=None,
-            url=None,
+            closes_at=closes_at,
+            market_count=int(raw.get("markets_count", 0) or 0),
+            aggregate_volume=Decimal(str(volume_raw)) if volume_raw is not None else None,
+            volume_metric=VolumeMetric.USD_TOTAL,
+            url=(
+                f"https://kalshi.com/markets/{series_ticker}/{ticker}"
+                if series_ticker else None
+            ),
             raw_id=raw_id,
             schema_version=1,
         )
-    except (KeyError, TypeError, Exception) as exc:
+    except (KeyError, ValueError, ValidationError) as exc:
         raise SchemaDrift(
             venue=Venue.KALSHI,
-            endpoint="event",
+            endpoint="/events",
             raw_id=raw_id or 0,
             validator_errors=[str(exc)],
         ) from exc
@@ -3835,39 +3891,9 @@ async def iter_series(
         cursor = next_cursor
 ```
 
-Add `normalize_series` to `src/pytheum/venues/kalshi/normalizer.py`:
-
-```python
-def normalize_series(raw: dict[str, Any], *, raw_id: int) -> Category:
-    """Normalize a raw Kalshi series payload into a Category model.
-
-    Kalshi series are category buckets: each has a ticker (e.g. "KXBTC"),
-    a title (e.g. "Bitcoin"), and a category string (e.g. "Crypto").
-    We map:
-        native_id    = series["ticker"]
-        native_label = series["title"]     (or "ticker" if title absent)
-        display_label = series.get("category") or series["title"]
-
-    Raises SchemaDrift if required fields are missing.
-    """
-    try:
-        ticker = raw["ticker"]
-        title = raw.get("title") or ticker
-        category_label = raw.get("category") or title
-        return Category(
-            venue=Venue.KALSHI,
-            native_id=ticker,
-            native_label=title,
-            display_label=category_label,
-        )
-    except (KeyError, ValidationError) as exc:
-        raise SchemaDrift(
-            venue=Venue.KALSHI,
-            endpoint="/series",
-            raw_id=raw_id,
-            validator_errors=str(exc),
-        ) from exc
-```
+> **`normalize_series` and `normalize_series_to_categories` were defined in Task 5** —
+> do not redefine them here. Import directly from
+> `pytheum.venues.kalshi.normalizer` when needed in tests or service code.
 
 Implement in `src/pytheum/services/fetch.py` (replace `NotImplementedError` stubs):
 
@@ -4403,46 +4429,8 @@ async def iter_events(
         cursor = next_cursor
 ```
 
-Add `normalize_event` to `src/pytheum/venues/kalshi/normalizer.py`:
-
-```python
-def normalize_event(raw: dict[str, Any], *, raw_id: int) -> Event:
-    """Normalize a Kalshi event payload (list or detail — nested markets ignored here).
-
-    Mapping: event_ticker→native_id, series_ticker→primary_category,
-    close_time→closes_at, markets_count→market_count, volume→aggregate_volume.
-    """
-    try:
-        ticker = raw["event_ticker"]
-        series_ticker = raw.get("series_ticker") or raw.get("category", "")
-        category: Category | None = (
-            Category(venue=Venue.KALSHI, native_id=series_ticker,
-                     native_label=series_ticker, display_label=series_ticker)
-            if series_ticker else None
-        )
-        closes_at_raw = raw.get("close_time") or raw.get("closes_at")
-        closes_at: datetime | None = (
-            datetime.fromisoformat(closes_at_raw.rstrip("Z")).replace(tzinfo=UTC)
-            if closes_at_raw else None
-        )
-        volume_raw = raw.get("volume") or raw.get("dollar_volume")
-        return Event(
-            venue=Venue.KALSHI,
-            native_id=ticker,
-            title=raw.get("title") or ticker,
-            primary_category=category,
-            closes_at=closes_at,
-            market_count=int(raw.get("markets_count", 0) or 0),
-            aggregate_volume=Decimal(str(volume_raw)) if volume_raw is not None else None,
-            volume_metric=VolumeMetric.USD_TOTAL,
-            url=(f"https://kalshi.com/markets/{series_ticker}/{ticker}"
-                 if series_ticker else None),
-            schema_version=1,
-        )
-    except (KeyError, ValueError, ValidationError) as exc:
-        raise SchemaDrift(venue=Venue.KALSHI, endpoint="/events",
-                          raw_id=raw_id, validator_errors=str(exc)) from exc
-```
+> **`normalize_event` was defined in Task 5** — do not redefine it here.
+> Import directly from `pytheum.venues.kalshi.normalizer` when needed in tests or service code.
 
 Implement in `src/pytheum/services/fetch.py` (uses `self._persist` from Task 7):
 
@@ -5067,78 +5055,16 @@ async def iter_markets(
         cursor = next_cursor
 ```
 
-Add `normalize_market` + `_KALSHI_STATUS` + `_midpoint` to
-`src/pytheum/venues/kalshi/normalizer.py`:
+**Note:** `normalize_market` is already defined in Task 5 (the canonical normalizer module). When implementing Task 9, **extend the existing Task 5 `normalize_market`** with the richer mappings below — do NOT add a second function. The implementer should merge these refinements into the Task 5 body:
 
-```python
-_KALSHI_STATUS: dict[str, str] = {
-    "active": "open", "open": "open", "closed": "closed",
-    "settled": "settled", "determined": "settled",
-    "unopened": "unopened", "paused": "paused",
-}
+- Use a `_midpoint(bid, ask)` helper to compute outcome prices from `yes_bid/yes_ask` (and `no_bid/no_ask`) rather than the bid alone
+- Apply the full `_KALSHI_STATUS` mapping (already defined in Task 5; ensure `"determined"` maps to `"settled"`)
+- Set `volume_metric=VolumeMetric.USD_24H` when `volume_24h` is the source field; fall back to `volume`
+- Parse `close_time` (Kalshi-flavoured ISO with trailing `Z`) into `closes_at`
+- Drop outcomes whose bid AND ask are both `None`
+- Construct `url=f"https://kalshi.com/markets/{ticker}"` when `event_ticker` is missing
 
-
-def _midpoint(bid: int | float | None, ask: int | float | None) -> float | None:
-    if bid is not None and ask is not None:
-        return (bid + ask) / 2
-    return float(bid) if bid is not None else (float(ask) if ask is not None else None)
-
-
-def normalize_market(raw: dict[str, Any], *, raw_id: int) -> Market:
-    """Normalize a Kalshi market payload.
-
-    Mapping: ticker→native_id, event_ticker→event_native_id, status via
-    _KALSHI_STATUS, yes_bid/yes_ask/no_bid/no_ask→Outcome midpoints (cents/100
-    → [0,1]), volume_24h|volume→total_volume, close_time→closes_at.
-    """
-    try:
-        ticker = raw["ticker"]
-        event_ticker: str | None = raw.get("event_ticker") or None
-        status = _KALSHI_STATUS.get(raw.get("status", "open"), "open")
-        closes_at_raw = raw.get("close_time") or raw.get("closes_at")
-        closes_at: datetime | None = (
-            datetime.fromisoformat(closes_at_raw.rstrip("Z")).replace(tzinfo=UTC)
-            if closes_at_raw else None
-        )
-
-        def _outcome(side: str, bid_key: str, ask_key: str) -> Outcome | None:
-            mid = _midpoint(raw.get(bid_key), raw.get(ask_key))
-            if mid is None and raw.get(bid_key) is None and raw.get(ask_key) is None:
-                return None
-            return Outcome(
-                venue=Venue.KALSHI, market_native_id=ticker,
-                outcome_id=side, token_id=None, label=side.upper(),
-                price=Decimal(str(mid)) / 100 if mid is not None else None,
-                native_price=Decimal(str(mid)) if mid is not None else None,
-                price_unit=PriceUnit.CENTS_100,
-                volume=None, volume_metric=VolumeMetric.UNKNOWN, schema_version=1,
-            )
-
-        outcomes = [
-            o for o in [
-                _outcome("yes", "yes_bid", "yes_ask"),
-                _outcome("no", "no_bid", "no_ask"),
-            ] if o is not None
-        ]
-        vol_raw = raw.get("volume_24h") or raw.get("volume")
-        oi_raw = raw.get("open_interest")
-        title = raw.get("title") or ticker
-        return Market(
-            venue=Venue.KALSHI, native_id=ticker, event_native_id=event_ticker,
-            title=title, question=raw.get("subtitle") or raw.get("question") or title,
-            status=status,  # type: ignore[arg-type]
-            outcomes=outcomes,
-            total_volume=Decimal(str(vol_raw)) if vol_raw is not None else None,
-            volume_metric=VolumeMetric.USD_24H,
-            open_interest=Decimal(str(oi_raw)) if oi_raw is not None else None,
-            liquidity=None, closes_at=closes_at,
-            url=f"https://kalshi.com/markets/{ticker}" if event_ticker is None else None,
-            schema_version=1,
-        )
-    except (KeyError, ValueError, ValidationError) as exc:
-        raise SchemaDrift(venue=Venue.KALSHI, endpoint="/markets",
-                          raw_id=raw_id, validator_errors=str(exc)) from exc
-```
+The function signature stays as in Task 5: `normalize_market(payload: dict[str, Any], *, raw_id: int | None = None) -> Market` — it accepts the wrapped form `{"market": {...}}` and pulls `block = payload["market"]` internally.
 
 Implement in `src/pytheum/services/fetch.py` (uses `self._persist` from Task 7):
 
@@ -5563,12 +5489,25 @@ async def test_fetch_orderbook_upserts_both_sides(tmp_path):
     from pytheum.venues.kalshi.client import KalshiClient
     from pytheum.services.fetch import KalshiFetchService
 
-    payload, entry = mf("orderbook")
+    orderbook_payload, entry = mf("orderbook")
+    market_payload, _ = mf("markets_detail")
+    event_payload, _ = mf("events_detail")
     ticker = entry["captured_id"]
-    # fetch_orderbook internally calls fetch_market (FK chain), which in turn
-    # calls fetch_event_with_markets. The mock returns the orderbook fixture
-    # for all requests — service handles normalization from the raw body.
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
+    event_ticker = ticker.rsplit("-T", 1)[0]  # e.g. "KXBTC-25DEC-T95000" → "KXBTC-25DEC"
+
+    # Path-aware dispatcher: fetch_orderbook → fetch_market (FK) → fetch_event_with_markets (FK).
+    # Each sub-request must receive the correct payload shape for normalization to succeed.
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith(f"/markets/{ticker}/orderbook"):
+            return httpx.Response(200, json=orderbook_payload)
+        if path.endswith(f"/events/{event_ticker}"):
+            return httpx.Response(200, json=event_payload)
+        if path.endswith(f"/markets/{ticker}"):
+            return httpx.Response(200, json=market_payload)
+        return httpx.Response(404, json={"error": "unmocked path: " + path})
+
+    transport = httpx.MockTransport(handler)
 
     storage = Storage(tmp_path / "t.duckdb")
     storage.migrate()
@@ -5605,10 +5544,24 @@ async def test_fetch_candlesticks_upserts_price_points(tmp_path):
     from pytheum.venues.kalshi.client import KalshiClient
     from pytheum.services.fetch import KalshiFetchService
 
-    payload, entry = mf("candlesticks")
+    candlesticks_payload, entry = mf("candlesticks")
+    market_payload, _ = mf("markets_detail")
+    event_payload, _ = mf("events_detail")
     ticker = entry["captured_id"]
-    # fetch_candlesticks internally calls fetch_market (FK chain).
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
+    event_ticker = ticker.rsplit("-T", 1)[0]  # e.g. "KXBTC-25DEC-T95000" → "KXBTC-25DEC"
+
+    # Path-aware dispatcher: fetch_candlesticks → fetch_market (FK) → fetch_event_with_markets (FK).
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith(f"/markets/{ticker}/candlesticks"):
+            return httpx.Response(200, json=candlesticks_payload)
+        if path.endswith(f"/events/{event_ticker}"):
+            return httpx.Response(200, json=event_payload)
+        if path.endswith(f"/markets/{ticker}"):
+            return httpx.Response(200, json=market_payload)
+        return httpx.Response(404, json={"error": "unmocked path: " + path})
+
+    transport = httpx.MockTransport(handler)
 
     storage = Storage(tmp_path / "t.duckdb")
     storage.migrate()
@@ -6173,11 +6126,24 @@ async def test_iter_trades_persists_to_db(tmp_path):
     from pytheum.venues.kalshi.client import KalshiClient
     from pytheum.services.fetch import KalshiFetchService
 
-    payload, entry = mf("trades_live")
+    trades_payload, entry = mf("trades_live")
+    market_payload, _ = mf("markets_detail")
+    event_payload, _ = mf("events_detail")
     ticker = entry["captured_ticker"]
-    # iter_trades internally calls fetch_market (FK chain); mock returns
-    # trades payload for all requests.
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
+    event_ticker = ticker.rsplit("-T", 1)[0]
+
+    # Path-aware dispatcher: iter_trades → fetch_market (FK) → fetch_event_with_markets (FK).
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/markets/trades") or path.endswith("/historical/trades"):
+            return httpx.Response(200, json=trades_payload)
+        if path.endswith(f"/events/{event_ticker}"):
+            return httpx.Response(200, json=event_payload)
+        if path.endswith(f"/markets/{ticker}"):
+            return httpx.Response(200, json=market_payload)
+        return httpx.Response(404, json={"error": "unmocked path: " + path})
+
+    transport = httpx.MockTransport(handler)
 
     storage = Storage(tmp_path / "t.duckdb")
     storage.migrate()
@@ -6205,9 +6171,24 @@ async def test_iter_trades_historical_flag(tmp_path):
     from pytheum.venues.kalshi.client import KalshiClient
     from pytheum.services.fetch import KalshiFetchService
 
-    payload, entry = mf("trades_historical")
+    trades_payload, entry = mf("trades_historical")
+    market_payload, _ = mf("markets_detail")
+    event_payload, _ = mf("events_detail")
     ticker = entry["captured_ticker"]
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
+    event_ticker = ticker.rsplit("-T", 1)[0]
+
+    # Path-aware dispatcher: iter_trades (historical=True) → fetch_market (FK).
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/markets/trades") or path.endswith("/historical/trades"):
+            return httpx.Response(200, json=trades_payload)
+        if path.endswith(f"/events/{event_ticker}"):
+            return httpx.Response(200, json=event_payload)
+        if path.endswith(f"/markets/{ticker}"):
+            return httpx.Response(200, json=market_payload)
+        return httpx.Response(404, json={"error": "unmocked path: " + path})
+
+    transport = httpx.MockTransport(handler)
 
     storage = Storage(tmp_path / "t.duckdb")
     storage.migrate()
@@ -6235,9 +6216,24 @@ async def test_iter_trades_currency_and_size_unit(tmp_path):
     from pytheum.services.fetch import KalshiFetchService
     from pytheum.data.models import SizeUnit
 
-    payload, entry = mf("trades_live")
+    trades_payload, entry = mf("trades_live")
+    market_payload, _ = mf("markets_detail")
+    event_payload, _ = mf("events_detail")
     ticker = entry["captured_ticker"]
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
+    event_ticker = ticker.rsplit("-T", 1)[0]
+
+    # Path-aware dispatcher: iter_trades → fetch_market (FK) → fetch_event_with_markets (FK).
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/markets/trades") or path.endswith("/historical/trades"):
+            return httpx.Response(200, json=trades_payload)
+        if path.endswith(f"/events/{event_ticker}"):
+            return httpx.Response(200, json=event_payload)
+        if path.endswith(f"/markets/{ticker}"):
+            return httpx.Response(200, json=market_payload)
+        return httpx.Response(404, json={"error": "unmocked path: " + path})
+
+    transport = httpx.MockTransport(handler)
 
     storage = Storage(tmp_path / "t.duckdb")
     storage.migrate()
@@ -6371,57 +6367,19 @@ async def iter_trades(
 
 ---
 
-- [ ] **Step 5: Implement `fetch.py` additions + normalizer**
+- [ ] **Step 5: Implement `fetch.py` additions (use the Task 5 `normalize_trade`)**
 
-Add `normalize_trade` to `src/pytheum/venues/kalshi/normalizer.py` if not already present
-from the Part 2A/2B tasks (Tasks 5-9). If it exists, verify the signature matches and skip
-this sub-step.
+`normalize_trade` is the canonical version defined in Task 5 — do NOT add a second function. When implementing Task 11, **extend the existing Task 5 `normalize_trade`** with these refinements as needed:
 
-```python
-def normalize_trade(item: dict[str, Any], *, raw_id: int | None) -> Trade:
-    """Normalize one Kalshi trade record to the Trade model.
+- Map `taker_side` → `outcome_id` (direct) and to `side` via the heuristic: `"yes" → "buy"`, `"no" → "sell"` (an exchange-level approximation; document the heuristic in a comment).
+- Read price from `yes_price` (cents): `native_price = Decimal(str(item["yes_price"]))`, `price = native_price / Decimal("100")`.
+- Read size from `count`: `native_size = Decimal(str(item["count"]))`, `size_unit = SizeUnit.CONTRACTS`.
+- Compute `notional = native_price * native_size / Decimal("100")` (USD value).
+- Set `currency = "usd"` (Kalshi is USD-denominated).
+- Parse `created_time` (ISO-8601 with `Z`) via `datetime.fromisoformat(s.replace("Z", "+00:00"))`. If `created_time` arrives as a Unix epoch int, fall back to `datetime.fromtimestamp(int(s), tz=UTC)`.
+- `market_native_id = item.get("ticker", "")` (Kalshi includes the ticker on each trade row).
 
-    Kalshi field mapping:
-    - ``taker_side`` → ``outcome_id`` (direct) + ``side`` (heuristic, see below)
-    - ``yes_price`` → ``native_price`` (cents), ``price`` = native_price / 100
-    - ``count`` → ``native_size`` (contracts)
-    - ``notional`` = native_price * native_size / 100  (USD value)
-    - ``currency`` = "usd"  (Kalshi is USD-denominated)
-    - ``size_unit`` = SizeUnit.CONTRACTS
-
-    HEURISTIC: taker_side→side mapping:
-        "yes" → "buy"  (taker bought YES)
-        "no"  → "sell" (taker bought NO, i.e. sold YES from the venue's perspective)
-    This is a directional approximation, not an authoritative exchange-level buy/sell signal.
-    """
-    taker_side = item.get("taker_side", "yes")
-    native_price = Decimal(str(item["yes_price"]))
-    native_size = Decimal(str(item["count"]))
-    price = native_price / Decimal("100")
-    notional = native_price * native_size / Decimal("100")
-    created = item["created_time"]
-    if isinstance(created, str):
-        ts = datetime.fromisoformat(created.replace("Z", "+00:00"))
-    else:
-        from datetime import UTC
-        ts = datetime.fromtimestamp(int(created), tz=UTC)
-    return Trade(
-        venue=Venue.KALSHI,
-        market_native_id=item.get("ticker", ""),
-        outcome_id=taker_side,
-        price=price,
-        native_price=native_price,
-        price_unit=PriceUnit.CENTS_100,
-        size=native_size,
-        native_size=native_size,
-        size_unit=SizeUnit.CONTRACTS,
-        notional=notional,
-        currency="usd",
-        side="buy" if taker_side == "yes" else "sell",  # HEURISTIC: taker_side→side
-        timestamp=ts,
-        schema_version=1,
-    )
-```
+The function signature stays as in Task 5: `normalize_trade(item: dict[str, Any], *, raw_id: int | None = None) -> Trade`.
 
 Add `iter_trades` to `src/pytheum/services/fetch.py`:
 
@@ -6715,7 +6673,8 @@ from pytheum.data.repository import MarketRepository
 from pytheum.data.storage import Storage
 from pytheum.services.fetch import KalshiFetchService
 from pytheum.venues.kalshi.client import KalshiClient
-from pytheum.venues.kalshi.urls import parse_kalshi_url, parse_kalshi_ticker, MarketRef
+from pytheum.data.refs import MarketRef
+from pytheum.venues.kalshi.urls import parse_kalshi_url, parse_kalshi_ticker
 
 console = Console()
 
