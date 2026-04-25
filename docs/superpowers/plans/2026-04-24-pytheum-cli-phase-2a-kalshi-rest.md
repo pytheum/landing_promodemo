@@ -56,9 +56,9 @@ changed, do it BEFORE Task 1.
    `RateLimited(retry_after_s=…)` and `VenueUnavailable` (5xx) are the only retryable errors;
    others raise immediately.
 
-4. **Venue clients are pure fetchers; persistence lives in `KalshiFetchService`.**
-   `KalshiRest` takes NO `MarketRepository` parameter. Every method returns
-   `(parsed_model | AsyncIterator[parsed_model], RawEnvelope)`. The client never writes to
+4. **Venue clients are pure transport fetchers; persistence lives in `KalshiFetchService`.**
+   `KalshiRest` takes NO `MarketRepository` parameter. Every endpoint method returns
+   `(raw_body_dict, RawEnvelope)` or `(raw_body_dict, RawEnvelope, next_cursor)`. The client never writes to
    DuckDB. `KalshiFetchService` (at `pytheum/services/fetch.py`) takes a `KalshiClient` +
    `MarketRepository` and is the sole caller of `record_raw_rest` + normalizer + `upsert_*`.
    This preserves the strict layer boundary from spec §2: venue clients must not know about
@@ -131,8 +131,8 @@ pytheum-cli/
 │   │   ├── envelope.py                      NEW  Task 2 — RawEnvelope dataclass
 │   │   └── repository.py                    NEW  Task 1 — MarketRepository
 │   ├── services/
-│   │   ├── __init__.py                      NEW  Task 5 — empty package marker
-│   │   └── fetch.py                         NEW  Task 5 — KalshiFetchService
+│   │   ├── __init__.py                      NEW  Task 6 — empty package marker
+│   │   └── fetch.py                         NEW  Task 6 — KalshiFetchService
 │   └── venues/
 │       ├── __init__.py                      NEW  Task 2
 │       └── kalshi/
@@ -147,21 +147,21 @@ pytheum-cli/
     │   └── test_repository.py               NEW  Task 1
     ├── fixtures/
     │   └── kalshi/                          NEW  committed real-API captures (Tasks 5–11)
-    │       ├── manifest.json                NEW  Task 5 — endpoint → captured id map
-    │       ├── series_list.json             NEW  Task 5
-    │       ├── series_detail.json           NEW  Task 5  (no ticker suffix — see note below)
-    │       ├── events_list.json             NEW  Task 6
-    │       ├── events_detail.json           NEW  Task 6
-    │       ├── markets_list.json            NEW  Task 6
-    │       ├── markets_detail.json          NEW  Task 6
-    │       ├── orderbook.json               NEW  Task 7
-    │       ├── trades_live.json             NEW  Task 8
-    │       ├── historical_trades.json       NEW  Task 8
-    │       ├── candlesticks.json            NEW  Task 9
-    │       └── historical_cutoff.json       NEW  Task 9
+    │       ├── manifest.json                NEW  Task 6 — endpoint → captured id map
+    │       ├── series_list.json             NEW  Task 7
+    │       ├── series_detail.json           NEW  Task 7  (no ticker suffix — see note below)
+    │       ├── events_list.json             NEW  Task 8
+    │       ├── events_detail.json           NEW  Task 8
+    │       ├── markets_list.json            NEW  Task 9
+    │       ├── markets_detail.json          NEW  Task 9
+    │       ├── orderbook.json               NEW  Task 10
+    │       ├── trades_live.json             NEW  Task 11
+    │       ├── historical_trades.json       NEW  Task 11
+    │       ├── candlesticks.json            NEW  Task 10
+    │       └── historical_cutoff.json       NEW  Task 10
     ├── services/
-    │   ├── __init__.py                      NEW  Task 5
-    │   └── test_fetch.py                    NEW  Task 5
+    │   ├── __init__.py                      NEW  Task 6
+    │   └── test_fetch.py                    NEW  Task 6
     └── venues/
         ├── __init__.py                      NEW  Task 2
         └── kalshi/
@@ -169,7 +169,7 @@ pytheum-cli/
             ├── test_auth.py                 NEW  Task 2
             ├── test_urls.py                 NEW  Task 3
             ├── test_normalizer.py           NEW  Task 5
-            ├── test_rest.py                 NEW  Task 4 + extended in Tasks 6–9
+            ├── test_rest.py                 NEW  Task 4 + extended in Tasks 7–11
             └── test_client_integration.py  NEW  Task 12 — end-to-end with KalshiFetchService
 ```
 
@@ -1728,7 +1728,7 @@ git -c user.name="Konstantinos Anagnostopoulos" \
 ## Task 4: RawEnvelope-returning KalshiRest._send + KalshiClient (no repository dependency)
 
 This is the core architectural fix for reviewer finding #2 (layering conflict) and #3
-(raw_id=0 fallback). The client is a pure transporter. The service layer (Task 5) is
+(raw_id=0 fallback). The client is a pure transporter. The service layer (Task 6+) is
 responsible for all DB writes.
 
 Key changes from v1 plan:
@@ -2014,8 +2014,6 @@ async def test_signer_signs_full_path_including_prefix(fresh_signer: KalshiSigne
         padding.PSS(mgf=padding.MGF1(SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
         SHA256(),
     )
-```
-
 @pytest.mark.asyncio
 async def test_429_triggers_retry_and_eventually_succeeds() -> None:
     """A transport that returns 429 once then 200 must succeed after retry."""
@@ -2053,7 +2051,7 @@ Write `src/pytheum/venues/kalshi/rest.py`:
 
 Design contract (reviewer findings #2, #3):
 - NO MarketRepository parameter. This class never writes to DuckDB.
-- Every method returns (parsed_model, RawEnvelope).
+- Every endpoint method returns raw response data plus RawEnvelope.
   The service layer (KalshiFetchService) owns raw recording + normalize + upsert.
 - No raw_id=0 fallback — if a caller wants ephemeral data, it discards the envelope.
 
@@ -2068,7 +2066,6 @@ from __future__ import annotations
 
 import json as _json_module
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -2273,16 +2270,16 @@ class KalshiClient:
     ) -> None:
         self.config = config or KalshiConfig()
         self._clock = _clock or SystemClock()
-        base_url = getattr(config, "base_url", _BASE_URL) or _BASE_URL
+        base_url = self.config.base_url or _BASE_URL
         self._http = httpx.AsyncClient(
             base_url=base_url,
             timeout=15.0,
             headers={"Accept": "application/json"},
             transport=_transport,
         )
-        burst = max(1, int(config.rate_limit_per_sec))
+        burst = max(1, int(self.config.rate_limit_per_sec))
         self._rl = AsyncRateLimiter(
-            rate_per_sec=config.rate_limit_per_sec,
+            rate_per_sec=self.config.rate_limit_per_sec,
             burst=burst,
             clock=self._clock,
         )
@@ -2533,7 +2530,7 @@ class TestNormalizeMarket:
 class TestNormalizeOrderbook:
     def test_happy_path(self):
         yes_book, no_book = N.normalize_orderbook(
-            _orderbook_payload(), market_native_id=10, raw_id=4
+            _orderbook_payload(), market_native_id="KXINFL-25JAN-B3.5", raw_id=4
         )
         assert yes_book.outcome_id == "yes"
         assert len(yes_book.bids) == 2
@@ -2544,7 +2541,7 @@ class TestNormalizeOrderbook:
     def test_schema_drift_on_missing_orderbook_key(self):
         bad = {"wrong": {}}
         with pytest.raises(SchemaDrift):
-            N.normalize_orderbook(bad, market_native_id=10, raw_id=99)
+            N.normalize_orderbook(bad, market_native_id="KXINFL-25JAN-B3.5", raw_id=99)
 
 
 # ─────────────────────────────────────────────
@@ -2574,7 +2571,7 @@ class TestNormalizeCandlestick:
     def test_happy_path(self):
         points = N.normalize_candlestick(
             _candlestick_item(),
-            market_native_id=20,
+            market_native_id="KXINFL-25JAN-B3.5",
             interval="1min",
             raw_id=6,
         )
@@ -2589,7 +2586,7 @@ class TestNormalizeCandlestick:
         bad = {"yes_bid": {}, "yes_ask": {}, "volume": 0, "open_interest": 0}
         with pytest.raises(SchemaDrift):
             N.normalize_candlestick(
-                bad, market_native_id=20, interval="1min", raw_id=99
+                bad, market_native_id="KXINFL-25JAN-B3.5", interval="1min", raw_id=99
             )
 ```
 
@@ -2614,7 +2611,7 @@ All 12 tests fail at collection time.
 ```python
 """Pure normalizer functions for Kalshi REST payloads.
 
-Each function accepts ``*, raw_id: int | None = None`` and raises
+Each function accepts ``*, raw_id: int`` and raises
 :exc:`~pytheum.data.errors.SchemaDrift` on any KeyError or ValidationError
 so the caller (KalshiFetchService) can attach the real ``raw_id`` from
 ``record_raw_rest`` before re-raising.
@@ -2623,11 +2620,12 @@ No DuckDB, no HTTP — these are pure data transformations.
 """
 from __future__ import annotations
 
-import logging
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 import structlog
+from pydantic import ValidationError
 
 from pytheum.data.errors import SchemaDrift
 from pytheum.data.models import (
@@ -2707,7 +2705,7 @@ def _status(block: dict[str, Any]) -> str:
 def normalize_series_to_categories(
     payload: dict[str, Any],
     *,
-    raw_id: int | None = None,
+    raw_id: int,
 ) -> list[Category]:
     """Normalise a ``GET /series`` response into a list of :class:`Category` models."""
     try:
@@ -2725,7 +2723,7 @@ def normalize_series_to_categories(
         raise SchemaDrift(
             venue=Venue.KALSHI,
             endpoint="series",
-            raw_id=raw_id or 0,
+            raw_id=raw_id,
             validator_errors=[str(exc)],
         ) from exc
 
@@ -2813,7 +2811,7 @@ def normalize_event(
         raise SchemaDrift(
             venue=Venue.KALSHI,
             endpoint="/events",
-            raw_id=raw_id or 0,
+            raw_id=raw_id,
             validator_errors=[str(exc)],
         ) from exc
 
@@ -2821,7 +2819,7 @@ def normalize_event(
 def normalize_market(
     payload: dict[str, Any],
     *,
-    raw_id: int | None = None,
+    raw_id: int,
 ) -> Market:
     """Normalise a ``GET /markets/{ticker}`` response into a :class:`Market`.
 
@@ -2870,7 +2868,7 @@ def normalize_market(
         raise SchemaDrift(
             venue=Venue.KALSHI,
             endpoint="market",
-            raw_id=raw_id or 0,
+            raw_id=raw_id,
             validator_errors=[str(exc)],
         ) from exc
 
@@ -2878,8 +2876,8 @@ def normalize_market(
 def normalize_orderbook(
     payload: dict[str, Any],
     *,
-    market_native_id: int,
-    raw_id: int | None = None,
+    market_native_id: str,
+    raw_id: int,
 ) -> tuple[OrderBook, OrderBook]:
     """Normalise a ``GET /markets/{ticker}/orderbook`` response.
 
@@ -2930,7 +2928,7 @@ def normalize_orderbook(
         raise SchemaDrift(
             venue=Venue.KALSHI,
             endpoint="orderbook",
-            raw_id=raw_id or 0,
+            raw_id=raw_id,
             validator_errors=[str(exc)],
         ) from exc
 
@@ -2938,7 +2936,7 @@ def normalize_orderbook(
 def normalize_trade(
     item: dict[str, Any],
     *,
-    raw_id: int | None = None,
+    raw_id: int,
 ) -> Trade:
     """Normalise a single trade item from ``GET /markets/{ticker}/trades``.
 
@@ -2980,7 +2978,7 @@ def normalize_trade(
         raise SchemaDrift(
             venue=Venue.KALSHI,
             endpoint="trades",
-            raw_id=raw_id or 0,
+            raw_id=raw_id,
             validator_errors=[str(exc)],
         ) from exc
 
@@ -2988,9 +2986,9 @@ def normalize_trade(
 def normalize_candlestick(
     item: dict[str, Any],
     *,
-    market_native_id: int,
+    market_native_id: str,
     interval: str,
-    raw_id: int | None = None,
+    raw_id: int,
 ) -> list[PricePoint]:
     """Normalise a single candlestick item from ``GET /series/{ticker}/markets/candlesticks``.
 
@@ -3066,7 +3064,7 @@ def normalize_candlestick(
         raise SchemaDrift(
             venue=Venue.KALSHI,
             endpoint="candlesticks",
-            raw_id=raw_id or 0,
+            raw_id=raw_id,
             validator_errors=[str(exc)],
         ) from exc
 ```
@@ -3092,7 +3090,7 @@ tests/venues/kalshi/test_normalizer.py::TestNormalizeMarket::test_schema_drift_o
 tests/venues/kalshi/test_normalizer.py::TestNormalizeOrderbook::test_happy_path PASSED
 tests/venues/kalshi/test_normalizer.py::TestNormalizeOrderbook::test_schema_drift_on_missing_orderbook_key PASSED
 tests/venues/kalshi/test_normalizer.py::TestNormalizeTrade::test_happy_path PASSED
-tests/venues/kalshi/test_normalizer.py::TestNormalizeTrade::test_schema_drift_on_missing_trade_id PASSED
+tests/venues/kalshi/test_normalizer.py::TestNormalizeTrade::test_schema_drift_on_missing_taker_side PASSED
 tests/venues/kalshi/test_normalizer.py::TestNormalizeCandlestick::test_happy_path PASSED
 tests/venues/kalshi/test_normalizer.py::TestNormalizeCandlestick::test_schema_drift_on_missing_end_period_ts PASSED
 
@@ -3121,7 +3119,7 @@ feat(normalizer): add Kalshi REST normalizer — 6 pure functions, 12 unit tests
 - normalize_series_to_categories, normalize_event, normalize_market,
   normalize_orderbook, normalize_trade, normalize_candlestick
 - _KALSHI_STATUS dict + _cents_to_prob helper (verbatim from plan)
-- All functions accept *, raw_id: int | None = None and raise SchemaDrift
+- All functions accept *, raw_id: int and raise SchemaDrift
   on KeyError / ValidationError so KalshiFetchService can supply raw_id
 - Unknown status values emit structlog warning and fall back to "open"
 - Unknown interval strings pass through with a structlog warning
@@ -3251,7 +3249,7 @@ def fixture(endpoint_key: str) -> tuple[dict[str, Any], dict[str, Any]]:
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-import pytest
+import pytest_asyncio
 
 from pytheum.core.config import KalshiConfig
 from pytheum.data.repository import MarketRepository
@@ -3260,7 +3258,7 @@ from pytheum.services.fetch import KalshiFetchService
 from pytheum.venues.kalshi.client import KalshiClient
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def fetch_service(tmp_path: Path) -> AsyncIterator[KalshiFetchService]:
     storage = Storage(tmp_path / "test.duckdb")
     storage.migrate()
@@ -3332,6 +3330,7 @@ from pytheum.data.models import (
 from pytheum.venues.kalshi import normalizer
 
 if TYPE_CHECKING:
+    from pytheum.data.envelope import RawEnvelope
     from pytheum.data.repository import MarketRepository
     from pytheum.venues.kalshi.client import KalshiClient
 
@@ -3363,6 +3362,21 @@ class KalshiFetchService:
         self.client = client
         self.repo = repository
         self._schema_version = _SCHEMA_VERSION
+
+    def _persist(self, env: "RawEnvelope") -> int:
+        """Persist one raw REST envelope and return the raw_payloads id."""
+        return self.repo.record_raw_rest(
+            venue=env.venue,
+            endpoint=env.endpoint,
+            request_params=env.request_params,
+            payload=env.payload,
+            received_ts=env.received_ts,
+            source_ts=env.source_ts,
+            status_code=env.status_code,
+            duration_ms=env.duration_ms,
+            schema_version=self._schema_version,
+            native_ids=env.native_ids,
+        )
 
     # ─────────────────────────────────────────────────────────────────────
     # Stubs — all methods are stubs in Task 6; bodies arrive in Tasks 7–11
@@ -3573,17 +3587,16 @@ _MANIFEST = json.loads((_FIXTURES / "manifest.json").read_text())
 
 
 @pytest.mark.asyncio
-async def test_get_series_page_returns_models(kalshi_client: KalshiClient) -> None:
-    """get_series_page() returns (list[Category], RawEnvelope, next_cursor)."""
+async def test_get_series_page_returns_raw_body(kalshi_client: KalshiClient) -> None:
+    """get_series_page() returns (raw body, RawEnvelope, next_cursor)."""
     fixture = json.loads((_FIXTURES / "series_list.json").read_text())
     transport = httpx.MockTransport(
         lambda r: httpx.Response(200, json=fixture)
     )
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        categories, env, next_cursor = await kc.rest.get_series_page()
-    assert isinstance(categories, list)
-    assert len(categories) > 0
-    assert all(hasattr(c, "native_id") for c in categories)
+        body, env, next_cursor = await kc.rest.get_series_page()
+    assert isinstance(body, dict)
+    assert len(body.get("series", [])) > 0
     assert env.endpoint == "/series"
     assert env.status_code == 200
     # next_cursor is str | None — just assert the type
@@ -3610,7 +3623,7 @@ async def test_get_series_page_with_cursor(kalshi_client: KalshiClient) -> None:
 
 @pytest.mark.asyncio
 async def test_iter_series_yields_all_pages(kalshi_client: KalshiClient) -> None:
-    """iter_series() exhausts pagination and yields Category objects."""
+    """iter_series() exhausts pagination and yields raw series dicts."""
     # Page 1 has next_cursor; page 2 has no cursor → stops.
     fixture = json.loads((_FIXTURES / "series_list.json").read_text())
     page1 = dict(fixture, cursor="page2")
@@ -3632,17 +3645,17 @@ async def test_iter_series_yields_all_pages(kalshi_client: KalshiClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_get_series_returns_category(kalshi_client: KalshiClient) -> None:
-    """get_series(ticker) returns (Category, RawEnvelope)."""
+async def test_get_series_returns_raw_body(kalshi_client: KalshiClient) -> None:
+    """get_series(ticker) returns (raw body, RawEnvelope)."""
     fixture = json.loads((_FIXTURES / "series_detail.json").read_text())
     expected_ticker = _MANIFEST["series_detail"]["captured_id"]
     transport = httpx.MockTransport(
         lambda r: httpx.Response(200, json=fixture)
     )
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        category, env = await kc.rest.get_series(expected_ticker)
+        body, env = await kc.rest.get_series(expected_ticker)
 
-    assert category.native_id == expected_ticker
+    assert body["series"]["ticker"] == expected_ticker
     assert env.endpoint == f"/series/{expected_ticker}"
     assert env.status_code == 200
 
@@ -3739,8 +3752,12 @@ async def test_fetch_series_list_upserts_categories(tmp_path):
 
     assert len(categories) > 0
     for cat in categories:
-        assert cat.raw_id is not None
         assert cat.native_id
+    with repo.storage.connect() as conn:
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM raw_payloads WHERE venue='kalshi' AND endpoint='/series'"
+        ).fetchone()
+    assert raw_count is not None and raw_count[0] >= 1
 
 
 @pytest.mark.asyncio
@@ -3776,7 +3793,7 @@ async def test_fetch_series_list_multi_page(tmp_path):
 
 @pytest.mark.asyncio
 async def test_fetch_series_returns_category(tmp_path):
-    """fetch_series() records raw and returns the Category with raw_id set."""
+    """fetch_series() records raw, upserts the Category, and returns the normalized Category."""
     from pytheum.core.config import KalshiConfig
     from pytheum.data.repository import MarketRepository
     from pytheum.data.storage import Storage
@@ -3795,7 +3812,12 @@ async def test_fetch_series_returns_category(tmp_path):
         result = await svc.fetch_series(expected_id)
 
     assert result.native_id == expected_id
-    assert result.raw_id is not None
+    with repo.storage.connect() as conn:
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM raw_payloads WHERE venue='kalshi' AND endpoint=?",
+            [f"/series/{expected_id}"],
+        ).fetchone()
+    assert raw_count is not None and raw_count[0] == 1
 ```
 
 ---
@@ -3804,7 +3826,7 @@ async def test_fetch_series_returns_category(tmp_path):
 
 ```bash
 cd /Users/kanagn/Desktop/pytheum-cli
-uv run pytest tests/venues/kalshi/test_rest.py::test_get_series_page_returns_models \
+uv run pytest tests/venues/kalshi/test_rest.py::test_get_series_page_returns_raw_body \
               tests/venues/kalshi/test_normalizer.py::test_normalize_series_list_fixture \
               tests/services/test_fetch.py::test_fetch_series_list_upserts_categories \
               -v 2>&1 | head -40
@@ -3812,7 +3834,7 @@ uv run pytest tests/venues/kalshi/test_rest.py::test_get_series_page_returns_mod
 
 Expected output:
 ```
-FAILED tests/venues/kalshi/test_rest.py::test_get_series_page_returns_models
+FAILED tests/venues/kalshi/test_rest.py::test_get_series_page_returns_raw_body
   AttributeError: 'KalshiRest' object has no attribute 'get_series_page'
 FAILED tests/venues/kalshi/test_normalizer.py::test_normalize_series_list_fixture
   ImportError: cannot import name 'normalize_series' from 'pytheum.venues.kalshi.normalizer'
@@ -3836,56 +3858,52 @@ async def get_series_page(
     *,
     cursor: str | None = None,
     limit: int = _LIMIT_SERIES,
-) -> tuple[list[Category], RawEnvelope, str | None]:
+) -> tuple[dict[str, Any], RawEnvelope, str | None]:
     """Fetch one page of series.
 
-    Returns (categories, envelope, next_cursor).
+    Returns (raw response body, envelope, next_cursor).
     next_cursor is None when the final page is reached.
     """
     params: dict[str, Any] = {"limit": limit}
     if cursor is not None:
         params["cursor"] = cursor
 
-    data, env = await self._send("GET", "/series", params=params)
-    categories = [
-        normalize_series(s, raw_id=0)  # raw_id=0; service layer replaces after persist
-        for s in data.get("series", [])
-    ]
-    next_cursor: str | None = data.get("cursor") or None
-    return categories, env, next_cursor
+    body, env = await self._send("GET", "/series", params=params)
+    next_cursor: str | None = body.get("cursor") or None
+    return body, env, next_cursor
 
 
 async def get_series(
     self,
     ticker: str,
-) -> tuple[Category, RawEnvelope]:
+) -> tuple[dict[str, Any], RawEnvelope]:
     """Fetch a single series by ticker.
 
-    Returns (category, envelope).
+    Returns (raw response body, envelope).
     Raises NoResults on 404.
     """
-    data, env = await self._send("GET", f"/series/{ticker}",
+    body, env = await self._send("GET", f"/series/{ticker}",
                                  params={}, native_ids=[ticker])
-    category = normalize_series(data["series"], raw_id=0)
-    return category, env
+    return body, env
 
 
 async def iter_series(
     self,
     *,
     limit: int = _LIMIT_SERIES,
-) -> AsyncIterator[Category]:
+) -> AsyncIterator[dict[str, Any]]:
     """Async iterator over all series pages.
 
     Envelope is discarded — use get_series_page when you need it.
+    This is a non-persisting raw transport convenience.
     """
     cursor: str | None = None
     while True:
-        categories, _env, next_cursor = await self.get_series_page(
+        body, _env, next_cursor = await self.get_series_page(
             cursor=cursor, limit=limit
         )
-        for cat in categories:
-            yield cat
+        for item in body.get("series", []):
+            yield item
         if next_cursor is None:
             break
         cursor = next_cursor
@@ -3897,8 +3915,8 @@ async def iter_series(
 
 Implement in `src/pytheum/services/fetch.py` (replace `NotImplementedError` stubs):
 
-> **`_persist(env)` helper pattern.** All three service tasks use the same
-> `record_raw_rest` call signature. Define a private helper to avoid repetition:
+> **`_persist(env)` helper pattern.** Task 6 defines this private helper so all
+> service tasks use the same `record_raw_rest` call signature:
 >
 > ```python
 > def _persist(self, env: RawEnvelope) -> int:
@@ -3911,9 +3929,8 @@ Implement in `src/pytheum/services/fetch.py` (replace `NotImplementedError` stub
 >     )
 > ```
 >
-> Tasks 8 and 9 call `self._persist(env)` rather than repeating the full kwarg block.
-> `RawEnvelope` must carry `next_cursor: str | None = None`; use
-> `dataclasses.replace(env, next_cursor=next_cursor)` to stash it after each page call.
+> Tasks 7–11 call `self._persist(env)` rather than repeating the full kwarg block.
+> Pagination cursors stay in method return values; `RawEnvelope` remains transport metadata only.
 
 ```python
 async def fetch_series_list(
@@ -3925,14 +3942,15 @@ async def fetch_series_list(
     all_categories: list[Category] = []
     cursor: str | None = None
     while True:
-        categories, env, next_cursor = await self.client.rest.get_series_page(
+        body, env, next_cursor = await self.client.rest.get_series_page(
             cursor=cursor, limit=limit
         )
         raw_id = self._persist(env)
+        categories = normalizer.normalize_series_to_categories(body, raw_id=raw_id)
         for cat in categories:
             self.repo.upsert_category(cat, raw_id=raw_id,
                                       schema_version=self._schema_version)
-            all_categories.append(cat.model_copy(update={"raw_id": raw_id}))
+            all_categories.append(cat)
         if next_cursor is None:
             break
         cursor = next_cursor
@@ -3940,10 +3958,10 @@ async def fetch_series_list(
 
 
 async def fetch_series(self, ticker: str) -> Category:
-    """Fetch a single series, persist raw, upsert category, return with raw_id."""
-    category, env = await self.client.rest.get_series(ticker)
+    """Fetch a single series, persist raw, upsert category, return the normalized category."""
+    body, env = await self.client.rest.get_series(ticker)
     raw_id = self._persist(env)
-    category = category.model_copy(update={"raw_id": raw_id})
+    category = normalizer.normalize_series(body["series"], raw_id=raw_id)
     self.repo.upsert_category(category, raw_id=raw_id,
                               schema_version=self._schema_version)
     return category
@@ -3963,10 +3981,10 @@ uv run pytest tests/venues/kalshi/test_rest.py -k "series" \
 
 Expected:
 ```
-tests/venues/kalshi/test_rest.py::test_get_series_page_returns_models PASSED
+tests/venues/kalshi/test_rest.py::test_get_series_page_returns_raw_body PASSED
 tests/venues/kalshi/test_rest.py::test_get_series_page_with_cursor PASSED
 tests/venues/kalshi/test_rest.py::test_iter_series_yields_all_pages PASSED
-tests/venues/kalshi/test_rest.py::test_get_series_returns_category PASSED
+tests/venues/kalshi/test_rest.py::test_get_series_returns_raw_body PASSED
 tests/venues/kalshi/test_rest.py::test_get_series_404_raises_no_results PASSED
 tests/venues/kalshi/test_normalizer.py::test_normalize_series_list_fixture PASSED
 tests/venues/kalshi/test_normalizer.py::test_normalize_series_detail_fixture PASSED
@@ -4020,8 +4038,8 @@ EOF
 
 ## Task 8: Events endpoints (`/events` list + `/events/{event_ticker}` detail with nested markets)
 
-`GET /events` returns paginated Event objects. `GET /events/{event_ticker}` returns an Event
-with a nested `markets` array — `get_event` returns `tuple[Event, list[Market], RawEnvelope]`.
+`GET /events` returns paginated raw event objects. `GET /events/{event_ticker}` returns a raw
+event payload with a nested `markets` array — `get_event` returns `tuple[dict[str, Any], RawEnvelope]`.
 Filters on the list endpoint (`series_ticker`, `status`) are passed through by the service.
 
 **Files:**
@@ -4103,14 +4121,13 @@ Append to `tests/venues/kalshi/test_rest.py`:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_events_page_returns_models(kalshi_client: KalshiClient) -> None:
+async def test_get_events_page_returns_raw_body(kalshi_client: KalshiClient) -> None:
     fixture = json.loads((_FIXTURES / "events_list.json").read_text())
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=fixture))
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        events, env, next_cursor = await kc.rest.get_events_page()
-    assert isinstance(events, list)
-    assert len(events) > 0
-    assert all(hasattr(e, "native_id") for e in events)
+        body, env, next_cursor = await kc.rest.get_events_page()
+    assert isinstance(body, dict)
+    assert len(body.get("events", [])) > 0
     assert env.endpoint == "/events"
 
 
@@ -4154,19 +4171,18 @@ async def test_iter_events_yields_across_pages(kalshi_client: KalshiClient) -> N
 
 
 @pytest.mark.asyncio
-async def test_get_event_returns_event_and_markets(kalshi_client: KalshiClient) -> None:
-    """get_event() returns (Event, list[Market], RawEnvelope)."""
+async def test_get_event_returns_raw_body(kalshi_client: KalshiClient) -> None:
+    """get_event() returns (raw body, RawEnvelope)."""
     fixture = json.loads((_FIXTURES / "events_detail.json").read_text())
     expected_ticker = _MANIFEST["events_detail"]["captured_id"]
     expected_market_count = _MANIFEST["events_detail"]["nested_market_count"]
 
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=fixture))
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        event, markets, env = await kc.rest.get_event(expected_ticker)
+        body, env = await kc.rest.get_event(expected_ticker)
 
-    assert event.native_id == expected_ticker
-    assert len(markets) == expected_market_count
-    assert all(hasattr(m, "native_id") for m in markets)
+    assert body["event"]["event_ticker"] == expected_ticker
+    assert len(body["event"].get("markets", [])) == expected_market_count
     assert env.endpoint == f"/events/{expected_ticker}"
 
 
@@ -4222,7 +4238,7 @@ def test_normalize_events_detail_with_nested_markets() -> None:
     expected_market_count = manifest["events_detail"]["nested_market_count"]
 
     event = normalize_event(raw_event, raw_id=1)
-    markets = [normalize_market(m, raw_id=1) for m in raw_event.get("markets", [])]
+    markets = [normalize_market({"market": m}, raw_id=1) for m in raw_event.get("markets", [])]
 
     assert event.native_id == expected_ticker
     assert len(markets) == expected_market_count
@@ -4325,7 +4341,7 @@ async def test_fetch_event_with_markets_upserts_event_and_markets(tmp_path):
 
 ```bash
 cd /Users/kanagn/Desktop/pytheum-cli
-uv run pytest tests/venues/kalshi/test_rest.py::test_get_events_page_returns_models \
+uv run pytest tests/venues/kalshi/test_rest.py::test_get_events_page_returns_raw_body \
               tests/venues/kalshi/test_normalizer.py::test_normalize_events_list_fixture \
               tests/services/test_fetch.py::test_fetch_events_upserts_events \
               -v 2>&1 | head -40
@@ -4333,7 +4349,7 @@ uv run pytest tests/venues/kalshi/test_rest.py::test_get_events_page_returns_mod
 
 Expected:
 ```
-FAILED tests/venues/kalshi/test_rest.py::test_get_events_page_returns_models
+FAILED tests/venues/kalshi/test_rest.py::test_get_events_page_returns_raw_body
   AttributeError: 'KalshiRest' object has no attribute 'get_events_page'
 FAILED tests/venues/kalshi/test_normalizer.py::test_normalize_events_list_fixture
   ImportError: cannot import name 'normalize_event' from 'pytheum.venues.kalshi.normalizer'
@@ -4359,10 +4375,10 @@ async def get_events_page(
     limit: int = _LIMIT_EVENTS,
     series_ticker: str | None = None,
     status: str | None = None,
-) -> tuple[list[Event], RawEnvelope, str | None]:
+) -> tuple[dict[str, Any], RawEnvelope, str | None]:
     """Fetch one page of events.
 
-    Returns (events, envelope, next_cursor).
+    Returns (raw response body, envelope, next_cursor).
     Filters: series_ticker, status — passed as query params when provided.
     """
     params: dict[str, Any] = {"limit": limit}
@@ -4373,35 +4389,25 @@ async def get_events_page(
     if status is not None:
         params["status"] = status
 
-    data, env = await self._send("GET", "/events", params=params)
-    events = [
-        normalize_event(e, raw_id=0)
-        for e in data.get("events", [])
-    ]
-    next_cursor: str | None = data.get("cursor") or None
-    return events, env, next_cursor
+    body, env = await self._send("GET", "/events", params=params)
+    next_cursor: str | None = body.get("cursor") or None
+    return body, env, next_cursor
 
 
 async def get_event(
     self,
     event_ticker: str,
-) -> tuple[Event, list[Market], RawEnvelope]:
+) -> tuple[dict[str, Any], RawEnvelope]:
     """Fetch a single event with nested markets.
 
-    Returns (event, markets, envelope).
+    Returns (raw response body, envelope).
     Raises NoResults on 404.
     """
-    data, env = await self._send(
+    body, env = await self._send(
         "GET", f"/events/{event_ticker}",
         params={}, native_ids=[event_ticker]
     )
-    raw_event = data["event"]
-    event = normalize_event(raw_event, raw_id=0)
-    markets = [
-        normalize_market(m, raw_id=0)
-        for m in raw_event.get("markets", [])
-    ]
-    return event, markets, env
+    return body, env
 
 
 async def iter_events(
@@ -4410,7 +4416,7 @@ async def iter_events(
     limit: int = _LIMIT_EVENTS,
     series_ticker: str | None = None,
     status: str | None = None,
-) -> AsyncIterator[Event]:
+) -> AsyncIterator[dict[str, Any]]:
     """Async iterator over all event pages.
 
     Envelope discarded — use get_events_page when you need it.
@@ -4418,11 +4424,11 @@ async def iter_events(
     """
     cursor: str | None = None
     while True:
-        events, _env, next_cursor = await self.get_events_page(
+        body, _env, next_cursor = await self.get_events_page(
             cursor=cursor, limit=limit,
             series_ticker=series_ticker, status=status,
         )
-        for ev in events:
+        for ev in body.get("events", []):
             yield ev
         if next_cursor is None:
             break
@@ -4452,14 +4458,18 @@ async def fetch_events(
         filters["status"] = status
 
     while True:
-        events, env, next_cursor = await self.client.rest.get_events_page(
+        body, env, next_cursor = await self.client.rest.get_events_page(
             cursor=cursor, limit=limit, **filters
         )
         raw_id = self._persist(env)
+        events = [
+            normalizer.normalize_event(raw_event, raw_id=raw_id)
+            for raw_event in body.get("events", [])
+        ]
         for ev in events:
             self.repo.upsert_event(ev, raw_id=raw_id,
                                    schema_version=self._schema_version)
-            all_events.append(ev.model_copy(update={"raw_id": raw_id}))
+            all_events.append(ev)
         if next_cursor is None:
             break
         cursor = next_cursor
@@ -4475,14 +4485,15 @@ async def fetch_event_with_markets(
     The single raw row covers both the event and its nested markets —
     they share the same raw_id because they came from the same HTTP response.
     """
-    event, markets, env = await self.client.rest.get_event(event_ticker)
+    body, env = await self.client.rest.get_event(event_ticker)
     raw_id = self._persist(env)
-    event = event.model_copy(update={"raw_id": raw_id})
+    raw_event = body["event"]
+    event = normalizer.normalize_event(raw_event, raw_id=raw_id)
     self.repo.upsert_event(event, raw_id=raw_id,
                            schema_version=self._schema_version)
     markets_out: list[Market] = []
-    for mkt in markets:
-        mkt = mkt.model_copy(update={"raw_id": raw_id})
+    for raw_market in raw_event.get("markets", []):
+        mkt = normalizer.normalize_market({"market": raw_market}, raw_id=raw_id)
         self.repo.upsert_market(mkt, raw_id=raw_id,
                                 schema_version=self._schema_version)
         markets_out.append(mkt)
@@ -4503,10 +4514,10 @@ uv run pytest tests/venues/kalshi/test_rest.py -k "event" \
 
 Expected:
 ```
-tests/venues/kalshi/test_rest.py::test_get_events_page_returns_models PASSED
+tests/venues/kalshi/test_rest.py::test_get_events_page_returns_raw_body PASSED
 tests/venues/kalshi/test_rest.py::test_get_events_page_filters PASSED
 tests/venues/kalshi/test_rest.py::test_iter_events_yields_across_pages PASSED
-tests/venues/kalshi/test_rest.py::test_get_event_returns_event_and_markets PASSED
+tests/venues/kalshi/test_rest.py::test_get_event_returns_raw_body PASSED
 tests/venues/kalshi/test_rest.py::test_get_event_404_raises_no_results PASSED
 tests/venues/kalshi/test_normalizer.py::test_normalize_events_list_fixture PASSED
 tests/venues/kalshi/test_normalizer.py::test_normalize_events_detail_with_nested_markets PASSED
@@ -4642,14 +4653,13 @@ Append to `tests/venues/kalshi/test_rest.py`:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_markets_page_returns_models() -> None:
+async def test_get_markets_page_returns_raw_body() -> None:
     fixture = json.loads((_FIXTURES / "markets_list.json").read_text())
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=fixture))
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        markets, env, next_cursor = await kc.rest.get_markets_page()
-    assert isinstance(markets, list)
-    assert len(markets) > 0
-    assert all(hasattr(m, "native_id") for m in markets)
+        body, env, next_cursor = await kc.rest.get_markets_page()
+    assert isinstance(body, dict)
+    assert len(body.get("markets", [])) > 0
     assert env.endpoint == "/markets"
 
 
@@ -4698,34 +4708,32 @@ async def test_iter_markets_exhausts_pages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_market_returns_market() -> None:
-    """get_market(ticker) returns (Market, RawEnvelope)."""
+async def test_get_market_returns_raw_body() -> None:
+    """get_market(ticker) returns (raw body, RawEnvelope)."""
     fixture = json.loads((_FIXTURES / "markets_detail.json").read_text())
     expected_ticker = _MANIFEST["markets_detail"]["captured_id"]
 
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=fixture))
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        market, env = await kc.rest.get_market(expected_ticker)
+        body, env = await kc.rest.get_market(expected_ticker)
 
-    assert market.native_id == expected_ticker
-    assert market.status in {"open", "closed", "settled", "unopened", "paused"}
+    assert body["market"]["ticker"] == expected_ticker
     assert env.endpoint == f"/markets/{expected_ticker}"
 
 
 @pytest.mark.asyncio
 async def test_get_market_outcomes_present() -> None:
-    """Market from detail fixture has two outcomes (binary market)."""
+    """Market detail fixture exposes enough raw prices to build binary outcomes."""
     fixture = json.loads((_FIXTURES / "markets_detail.json").read_text())
     expected_ticker = _MANIFEST["markets_detail"]["captured_id"]
 
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=fixture))
     async with KalshiClient(config=KalshiConfig(), _transport=transport) as kc:
-        market, _env = await kc.rest.get_market(expected_ticker)
+        body, _env = await kc.rest.get_market(expected_ticker)
 
-    # Binary markets have exactly 2 outcomes (YES / NO)
-    assert len(market.outcomes) == 2
-    outcome_ids = {o.outcome_id for o in market.outcomes}
-    assert outcome_ids == {"yes", "no"}
+    raw_market = body["market"]
+    assert "yes_bid" in raw_market or "yes_ask" in raw_market
+    assert "no_bid" in raw_market or "no_ask" in raw_market
 
 
 @pytest.mark.asyncio
@@ -4757,7 +4765,7 @@ def test_normalize_markets_list_fixture() -> None:
         .read_text()
     )
     expected_ids: list[str] = manifest["markets_list"]["captured_ids"]
-    markets = [normalize_market(m, raw_id=1) for m in fixture["markets"]]
+    markets = [normalize_market({"market": m}, raw_id=1) for m in fixture["markets"]]
     normalized_ids = [m.native_id for m in markets]
     for eid in expected_ids:
         assert eid in normalized_ids, f"{eid!r} missing from normalized markets"
@@ -4776,7 +4784,7 @@ def test_normalize_market_detail_fixture() -> None:
         .read_text()
     )
     expected_ticker = manifest["markets_detail"]["captured_id"]
-    market = normalize_market(fixture["market"], raw_id=1)
+    market = normalize_market({"market": fixture["market"]}, raw_id=1)
 
     assert market.native_id == expected_ticker
     assert market.venue.value == "kalshi"
@@ -4818,7 +4826,7 @@ def test_normalize_market_status_mapping() -> None:
     }
     for kalshi_status, expected_status in status_cases:
         raw = dict(base_raw, status=kalshi_status)
-        market = normalize_market(raw, raw_id=1)
+        market = normalize_market({"market": raw}, raw_id=1)
         assert market.status == expected_status, (
             f"Kalshi status {kalshi_status!r} → expected {expected_status!r}, "
             f"got {market.status!r}"
@@ -4950,7 +4958,7 @@ async def test_fetch_market_records_raw_and_upserts(tmp_path):
 
 ```bash
 cd /Users/kanagn/Desktop/pytheum-cli
-uv run pytest tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_models \
+uv run pytest tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_raw_body \
               tests/venues/kalshi/test_normalizer.py::test_normalize_markets_list_fixture \
               tests/services/test_fetch.py::test_fetch_markets_upserts_markets \
               -v 2>&1 | head -40
@@ -4958,7 +4966,7 @@ uv run pytest tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_mo
 
 Expected:
 ```
-FAILED tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_models
+FAILED tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_raw_body
   AttributeError: 'KalshiRest' object has no attribute 'get_markets_page'
 FAILED tests/venues/kalshi/test_normalizer.py::test_normalize_markets_list_fixture
   ImportError: cannot import name 'normalize_market' from 'pytheum.venues.kalshi.normalizer'
@@ -4985,10 +4993,10 @@ async def get_markets_page(
     event_ticker: str | None = None,
     series_ticker: str | None = None,
     status: str | None = None,
-) -> tuple[list[Market], RawEnvelope, str | None]:
+) -> tuple[dict[str, Any], RawEnvelope, str | None]:
     """Fetch one page of markets.
 
-    Returns (markets, envelope, next_cursor).
+    Returns (raw response body, envelope, next_cursor).
     Filters: event_ticker, series_ticker, status — passed when provided.
     """
     params: dict[str, Any] = {"limit": limit}
@@ -5001,30 +5009,25 @@ async def get_markets_page(
     if status is not None:
         params["status"] = status
 
-    data, env = await self._send("GET", "/markets", params=params)
-    markets = [
-        normalize_market(m, raw_id=0)
-        for m in data.get("markets", [])
-    ]
-    next_cursor: str | None = data.get("cursor") or None
-    return markets, env, next_cursor
+    body, env = await self._send("GET", "/markets", params=params)
+    next_cursor: str | None = body.get("cursor") or None
+    return body, env, next_cursor
 
 
 async def get_market(
     self,
     ticker: str,
-) -> tuple[Market, RawEnvelope]:
+) -> tuple[dict[str, Any], RawEnvelope]:
     """Fetch a single market by ticker.
 
-    Returns (market, envelope).
+    Returns (raw response body, envelope).
     Raises NoResults on 404.
     """
-    data, env = await self._send(
+    body, env = await self._send(
         "GET", f"/markets/{ticker}",
         params={}, native_ids=[ticker]
     )
-    market = normalize_market(data["market"], raw_id=0)
-    return market, env
+    return body, env
 
 
 async def iter_markets(
@@ -5034,7 +5037,7 @@ async def iter_markets(
     event_ticker: str | None = None,
     series_ticker: str | None = None,
     status: str | None = None,
-) -> AsyncIterator[Market]:
+) -> AsyncIterator[dict[str, Any]]:
     """Async iterator over all market pages.
 
     Envelope discarded — use get_markets_page when you need it.
@@ -5042,13 +5045,13 @@ async def iter_markets(
     """
     cursor: str | None = None
     while True:
-        markets, _env, next_cursor = await self.get_markets_page(
+        body, _env, next_cursor = await self.get_markets_page(
             cursor=cursor, limit=limit,
             event_ticker=event_ticker,
             series_ticker=series_ticker,
             status=status,
         )
-        for mkt in markets:
+        for mkt in body.get("markets", []):
             yield mkt
         if next_cursor is None:
             break
@@ -5064,7 +5067,7 @@ async def iter_markets(
 - Drop outcomes whose bid AND ask are both `None`
 - Construct `url=f"https://kalshi.com/markets/{ticker}"` when `event_ticker` is missing
 
-The function signature stays as in Task 5: `normalize_market(payload: dict[str, Any], *, raw_id: int | None = None) -> Market` — it accepts the wrapped form `{"market": {...}}` and pulls `block = payload["market"]` internally.
+The function signature stays as in Task 5: `normalize_market(payload: dict[str, Any], *, raw_id: int) -> Market` — it accepts the wrapped form `{"market": {...}}` and pulls `block = payload["market"]` internally.
 
 Implement in `src/pytheum/services/fetch.py` (uses `self._persist` from Task 7):
 
@@ -5089,12 +5092,15 @@ async def fetch_markets(
         filters["status"] = status
 
     while True:
-        markets, env, next_cursor = await self.client.rest.get_markets_page(
+        body, env, next_cursor = await self.client.rest.get_markets_page(
             cursor=cursor, limit=limit, **filters
         )
         raw_id = self._persist(env)
+        markets = [
+            normalizer.normalize_market({"market": raw_market}, raw_id=raw_id)
+            for raw_market in body.get("markets", [])
+        ]
         for mkt in markets:
-            mkt = mkt.model_copy(update={"raw_id": raw_id})
             self.repo.upsert_market(mkt, raw_id=raw_id,
                                     schema_version=self._schema_version)
             all_markets.append(mkt)
@@ -5120,7 +5126,10 @@ async def fetch_market(self, ticker: str) -> Market:
     """
     body, env = await self.client.rest.get_market(ticker)
     raw_id = self._persist(env)
-    market = normalize_market(body["market"] if "market" in body else body, raw_id=raw_id)
+    market = normalizer.normalize_market(
+        body if "market" in body else {"market": body},
+        raw_id=raw_id,
+    )
     # FK chain: ensure parent event exists before upserting market.
     if market.event_native_id is not None:
         await self.fetch_event_with_markets(market.event_native_id)  # idempotent upsert
@@ -5149,10 +5158,10 @@ uv run pytest tests/venues/kalshi/test_rest.py -k "market" \
 
 Expected:
 ```
-tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_models PASSED
+tests/venues/kalshi/test_rest.py::test_get_markets_page_returns_raw_body PASSED
 tests/venues/kalshi/test_rest.py::test_get_markets_page_filters PASSED
 tests/venues/kalshi/test_rest.py::test_iter_markets_exhausts_pages PASSED
-tests/venues/kalshi/test_rest.py::test_get_market_returns_market PASSED
+tests/venues/kalshi/test_rest.py::test_get_market_returns_raw_body PASSED
 tests/venues/kalshi/test_rest.py::test_get_market_outcomes_present PASSED
 tests/venues/kalshi/test_rest.py::test_get_market_404_raises_no_results PASSED
 tests/venues/kalshi/test_normalizer.py::test_normalize_markets_list_fixture PASSED
@@ -5340,10 +5349,9 @@ async def test_get_orderbook_returns_two_books(orderbook_transport):
     async with KalshiClient(_transport=orderbook_transport) as kc:
         entry = mf("orderbook")
         ticker = entry[1]["captured_id"]
-        (yes_book, no_book), env = await kc.rest.get_orderbook(ticker, depth=10)
-    assert yes_book.outcome_id == "yes"
-    assert no_book.outcome_id == "no"
-    assert yes_book.market_native_id == ticker
+        body, env = await kc.rest.get_orderbook(ticker, depth=10)
+    assert "orderbook" in body
+    assert "yes" in body["orderbook"] or "no" in body["orderbook"]
     assert env.status_code == 200
 
 
@@ -5354,15 +5362,15 @@ async def test_get_orderbook_same_raw_id_for_both_sides(orderbook_transport):
     async with KalshiClient(_transport=orderbook_transport) as kc:
         entry = mf("orderbook")
         ticker = entry[1]["captured_id"]
-        (yes_book, no_book), env = await kc.rest.get_orderbook(ticker)
+        body, env = await kc.rest.get_orderbook(ticker)
     # RawEnvelope carries one payload — the service layer is responsible for
     # persisting it once and using its raw_id for both yes and no upserts.
     assert env.payload is not None
-    assert "yes" in env.payload or "orderbook" in env.payload
+    assert body == env.payload
 
 
 @pytest.mark.asyncio
-async def test_get_candlesticks_returns_price_points(candlesticks_transport):
+async def test_get_candlesticks_returns_raw_body(candlesticks_transport):
     from pytheum.venues.kalshi.client import KalshiClient
     import time
     async with KalshiClient(_transport=candlesticks_transport) as kc:
@@ -5370,14 +5378,11 @@ async def test_get_candlesticks_returns_price_points(candlesticks_transport):
         ticker = entry[1]["captured_id"]
         start = int(time.time()) - 30 * 86400
         end = int(time.time())
-        pts, env = await kc.rest.get_candlesticks(
+        body, env = await kc.rest.get_candlesticks(
             ticker, interval="1d", start_ts=start, end_ts=end
         )
-    # Each candle yields 2 PricePoints (yes + no)
-    assert len(pts) > 0
-    assert len(pts) % 2 == 0
-    outcome_ids = {p.outcome_id for p in pts}
-    assert outcome_ids == {"yes", "no"}
+    assert isinstance(body, dict)
+    assert "candles" in body or "candlesticks" in body
 
 
 @pytest.mark.asyncio
@@ -5390,20 +5395,18 @@ async def test_get_candlesticks_interval_stored_as_internal(candlesticks_transpo
         ticker = entry[1]["captured_id"]
         start = int(time.time()) - 30 * 86400
         end = int(time.time())
-        pts, _ = await kc.rest.get_candlesticks(
+        body, _ = await kc.rest.get_candlesticks(
             ticker, interval="1d", start_ts=start, end_ts=end
         )
-    for p in pts:
-        assert p.interval in {"1m", "1h", "1d"}
+    assert isinstance(body, dict)
 
 
 @pytest.mark.asyncio
-async def test_get_historical_cutoff_returns_datetime_or_none(historical_cutoff_transport):
+async def test_get_historical_cutoff_returns_raw_body(historical_cutoff_transport):
     from pytheum.venues.kalshi.client import KalshiClient
-    from datetime import datetime
     async with KalshiClient(_transport=historical_cutoff_transport) as kc:
-        cutoff, env = await kc.rest.get_historical_cutoff()
-    assert cutoff is None or isinstance(cutoff, datetime)
+        body, env = await kc.rest.get_historical_cutoff()
+    assert isinstance(body, dict)
     assert env.status_code == 200
 ```
 
@@ -5421,8 +5424,7 @@ def test_normalize_orderbook_produces_yes_and_no():
     from pytheum.venues.kalshi.normalizer import normalize_orderbook
     payload, entry = mf("orderbook")
     ticker = entry["captured_id"]
-    ob_payload = payload.get("orderbook", payload)  # unwrap if nested
-    yes_book, no_book = normalize_orderbook(ob_payload, market_native_id=ticker, raw_id=1)
+    yes_book, no_book = normalize_orderbook(payload, market_native_id=ticker, raw_id=1)
     assert yes_book.outcome_id == "yes"
     assert no_book.outcome_id == "no"
     # Price must be in [0, 1] — normalizer converts cents to probability
@@ -5434,8 +5436,7 @@ def test_normalize_orderbook_bids_and_asks_present():
     from pytheum.venues.kalshi.normalizer import normalize_orderbook
     payload, entry = mf("orderbook")
     ticker = entry["captured_id"]
-    ob_payload = payload.get("orderbook", payload)
-    yes_book, no_book = normalize_orderbook(ob_payload, market_native_id=ticker, raw_id=1)
+    yes_book, no_book = normalize_orderbook(payload, market_native_id=ticker, raw_id=1)
     # At least one side must have levels (live market may have thin book — relax to >= 0)
     assert isinstance(yes_book.bids, list)
     assert isinstance(yes_book.asks, list)
@@ -5464,7 +5465,8 @@ def test_normalize_candlestick_uses_close_price():
     item = candles[0]
     pts = normalize_candlestick(item, market_native_id=ticker, interval="1d", raw_id=1)
     yes_pt = next(p for p in pts if p.outcome_id == "yes")
-    expected_close = item["yes_price"]["close"] / 100
+    yes_block = item.get("yes_bid") or item.get("yes_price")
+    expected_close = yes_block["close"] / 100
     assert float(yes_pt.price) == pytest.approx(expected_close, abs=1e-6)
 ```
 
@@ -5631,17 +5633,18 @@ async def get_orderbook(
     ticker: str,
     *,
     depth: int | None = None,
-) -> tuple[tuple[OrderBook, OrderBook], RawEnvelope]:
+) -> tuple[dict[str, Any], RawEnvelope]:
     """GET /markets/{ticker}/orderbook
 
-    Returns a (yes_book, no_book) pair plus the raw envelope.
+    Returns the raw response body plus the raw envelope.
 
     Kalshi response shape::
 
         {"orderbook": {"yes": [[price_cents, size], ...], "no": [[...], ...]}}
 
     Both sides come from one HTTP round-trip; the service layer persists the
-    raw payload ONCE and supplies its raw_id to both upsert_orderbook calls.
+    raw payload ONCE, normalizes with the real raw_id, and supplies that raw_id
+    to both upsert_orderbook calls.
     """
     params: dict[str, Any] = {}
     if depth is not None:
@@ -5652,11 +5655,7 @@ async def get_orderbook(
         params=params or None,
         native_ids=[ticker],
     )
-    ob_payload = body.get("orderbook", body)
-    yes_book, no_book = normalize_orderbook(
-        ob_payload, market_native_id=ticker, raw_id=None
-    )
-    return (yes_book, no_book), env
+    return body, env
 
 
 async def get_candlesticks(
@@ -5666,7 +5665,7 @@ async def get_candlesticks(
     interval: str,
     start_ts: int | None = None,
     end_ts: int | None = None,
-) -> tuple[list[PricePoint], RawEnvelope]:
+) -> tuple[dict[str, Any], RawEnvelope]:
     """GET /markets/{ticker}/candlesticks
 
     Kalshi requires ``start_ts``, ``end_ts`` (UNIX seconds), and
@@ -5675,8 +5674,8 @@ async def get_candlesticks(
     The ``interval`` parameter uses internal notation (``"1m"``/``"1h"``/``"1d"``);
     this method converts to Kalshi's integer before sending.
 
-    Each candle in the response yields TWO PricePoints — one for ``yes``, one
-    for ``no`` — using the ``close`` price.
+    The service layer normalizes each candle into TWO PricePoints — one for
+    ``yes``, one for ``no`` — using the ``close`` price.
     """
     if interval not in _INTERVAL_TO_KALSHI:
         raise ValueError(
@@ -5693,13 +5692,7 @@ async def get_candlesticks(
         params=params,
         native_ids=[ticker],
     )
-    candles = body.get("candles", body.get("candlesticks", []))
-    pts: list[PricePoint] = []
-    for item in candles:
-        pts.extend(
-            normalize_candlestick(item, market_native_id=ticker, interval=interval, raw_id=None)
-        )
-    return pts, env
+    return body, env
 
 
 async def get_historical_candlesticks(
@@ -5709,7 +5702,7 @@ async def get_historical_candlesticks(
     interval: str,
     start_ts: int | None = None,
     end_ts: int | None = None,
-) -> tuple[list[PricePoint], RawEnvelope]:
+) -> tuple[dict[str, Any], RawEnvelope]:
     """GET /historical/markets/{ticker}/candlesticks — same shape as get_candlesticks, different endpoint.
 
     Kalshi routes older price history through this path; the response schema is
@@ -5732,20 +5725,14 @@ async def get_historical_candlesticks(
         params=params,
         native_ids=[ticker],
     )
-    candles = body.get("candles", body.get("candlesticks", []))
-    pts: list[PricePoint] = []
-    for item in candles:
-        pts.extend(
-            normalize_candlestick(item, market_native_id=ticker, interval=interval, raw_id=None)
-        )
-    return pts, env
+    return body, env
 
 
-async def get_historical_cutoff(self) -> tuple[datetime | None, RawEnvelope]:
+async def get_historical_cutoff(self) -> tuple[dict[str, Any], RawEnvelope]:
     """GET /historical/cutoff
 
-    Returns the earliest timestamp for which historical candlestick data is
-    available, or ``None`` if the response field is absent/null.
+    Returns the raw response body. The service layer or caller can parse
+    ``cutoff_ts`` into a datetime if needed.
 
     Expected response shape::
 
@@ -5757,12 +5744,7 @@ async def get_historical_cutoff(self) -> tuple[datetime | None, RawEnvelope]:
         params=None,
         native_ids=[],
     )
-    raw_cutoff = body.get("cutoff_ts")
-    if raw_cutoff is None:
-        return None, env
-    from datetime import UTC
-    cutoff = datetime.fromtimestamp(int(raw_cutoff), tz=UTC)
-    return cutoff, env
+    return body, env
 ```
 
 ---
@@ -5786,24 +5768,13 @@ async def fetch_orderbook(
     """
     # FK chain: ensure market and its outcomes exist before upserting orderbook rows.
     await self.fetch_market(ticker)
-    (yes_book, no_book), env = await self.client.rest.get_orderbook(
+    body, env = await self.client.rest.get_orderbook(
         ticker, depth=depth
     )
-    raw_id = self.repo.record_raw_rest(
-        venue=env.venue,
-        endpoint=env.endpoint,
-        request_params=env.request_params,
-        payload=env.payload,
-        received_ts=env.received_ts,
-        source_ts=env.source_ts,
-        status_code=env.status_code,
-        duration_ms=env.duration_ms,
-        schema_version=1,
-        native_ids=env.native_ids,
+    raw_id = self._persist(env)
+    yes_book, no_book = normalizer.normalize_orderbook(
+        body, market_native_id=ticker, raw_id=raw_id
     )
-    # Re-attach raw_id to both books so downstream callers can trace them.
-    yes_book = yes_book.model_copy(update={"raw_id": raw_id})
-    no_book = no_book.model_copy(update={"raw_id": raw_id})
     self.repo.upsert_orderbook(yes_book, raw_id=raw_id, schema_version=1)
     self.repo.upsert_orderbook(no_book, raw_id=raw_id, schema_version=1)
     return yes_book, no_book
@@ -5830,27 +5801,24 @@ async def fetch_candlesticks(
     # FK chain: ensure market and its outcomes exist before upserting price_points rows.
     await self.fetch_market(ticker)
     if historical:
-        pts, env = await self.client.rest.get_historical_candlesticks(
+        body, env = await self.client.rest.get_historical_candlesticks(
             ticker, interval=interval, start_ts=start_ts, end_ts=end_ts
         )
     else:
-        pts, env = await self.client.rest.get_candlesticks(
+        body, env = await self.client.rest.get_candlesticks(
             ticker, interval=interval, start_ts=start_ts, end_ts=end_ts
+        )
+    raw_id = self._persist(env)
+    candles = body.get("candles", body.get("candlesticks", []))
+    pts: list[PricePoint] = []
+    for item in candles:
+        pts.extend(
+            normalizer.normalize_candlestick(
+                item, market_native_id=ticker, interval=interval, raw_id=raw_id
+            )
         )
     if not pts:
         return pts
-    raw_id = self.repo.record_raw_rest(
-        venue=env.venue,
-        endpoint=env.endpoint,
-        request_params=env.request_params,
-        payload=env.payload,
-        received_ts=env.received_ts,
-        source_ts=env.source_ts,
-        status_code=env.status_code,
-        duration_ms=env.duration_ms,
-        schema_version=1,
-        native_ids=env.native_ids,
-    )
     self.repo.upsert_price_points(pts, raw_id=raw_id, schema_version=1)
     return pts
 ```
@@ -5995,8 +5963,8 @@ async def test_get_trades_page_returns_list_and_cursor(trades_live_transport):
     entry = mf("trades_live")
     ticker = entry[1]["captured_ticker"]
     async with KalshiClient(_transport=trades_live_transport) as kc:
-        trades, env, next_cursor = await kc.rest.get_trades_page(ticker)
-    assert isinstance(trades, list)
+        body, env, next_cursor = await kc.rest.get_trades_page(ticker)
+    assert isinstance(body.get("trades", []), list)
     assert env.status_code == 200
     # next_cursor is None when there are no more pages (small fixture)
     assert next_cursor is None or isinstance(next_cursor, str)
@@ -6005,20 +5973,17 @@ async def test_get_trades_page_returns_list_and_cursor(trades_live_transport):
 @pytest.mark.asyncio
 async def test_get_trades_page_trade_fields(trades_live_transport):
     from pytheum.venues.kalshi.client import KalshiClient
-    from pytheum.data.models import SizeUnit
-    from decimal import Decimal
     entry = mf("trades_live")
     ticker = entry[1]["captured_ticker"]
     async with KalshiClient(_transport=trades_live_transport) as kc:
-        trades, _, _ = await kc.rest.get_trades_page(ticker)
+        body, _, _ = await kc.rest.get_trades_page(ticker)
+    trades = body.get("trades", [])
     if not trades:
         pytest.skip("No trades in fixture")
     for t in trades:
-        assert t.currency == "usd"
-        assert t.size_unit == SizeUnit.CONTRACTS
-        assert 0 <= float(t.price) <= 1, f"price out of range: {t.price}"
-        assert t.outcome_id in {"yes", "no"}
-        assert t.side in {"buy", "sell"}
+        assert t["taker_side"] in {"yes", "no"}
+        assert "count" in t
+        assert "yes_price" in t or "no_price" in t
 
 
 @pytest.mark.asyncio
@@ -6027,22 +5992,21 @@ async def test_get_historical_trades_page_returns_list(trades_historical_transpo
     entry = mf("trades_historical")
     ticker = entry[1]["captured_ticker"]
     async with KalshiClient(_transport=trades_historical_transport) as kc:
-        trades, env, _ = await kc.rest.get_historical_trades_page(ticker)
-    assert isinstance(trades, list)
+        body, env, _ = await kc.rest.get_historical_trades_page(ticker)
+    assert isinstance(body.get("trades", []), list)
     assert env.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_iter_trades_yields_trade_objects(trades_live_transport):
     from pytheum.venues.kalshi.client import KalshiClient
-    from pytheum.data.models import Trade
     entry = mf("trades_live")
     ticker = entry[1]["captured_ticker"]
     async with KalshiClient(_transport=trades_live_transport) as kc:
         collected = []
         async for t in kc.rest.iter_trades(ticker):
             collected.append(t)
-            assert isinstance(t, Trade)
+            assert isinstance(t, dict)
     # At minimum we should get whatever the fixture contains
     assert isinstance(collected, list)
 ```
@@ -6281,10 +6245,10 @@ async def get_trades_page(
     limit: int = _LIMIT_TRADES,
     min_ts: int | None = None,
     max_ts: int | None = None,
-) -> tuple[list[Trade], RawEnvelope, str | None]:
+) -> tuple[dict[str, Any], RawEnvelope, str | None]:
     """GET /markets/trades?ticker=... — one cursor page of live trades.
 
-    Returns ``(trades, envelope, next_cursor)``.
+    Returns ``(raw response body, envelope, next_cursor)``.
     ``next_cursor`` is ``None`` when no further pages exist.
     ``limit`` defaults to ``_LIMIT_TRADES = 1000`` (Kalshi's documented max).
     """
@@ -6298,10 +6262,8 @@ async def get_trades_page(
     body, env = await self._send(
         "GET", "/markets/trades", params=params, native_ids=[ticker]
     )
-    raw_trades = body.get("trades", [])
-    trades = [normalize_trade(item, raw_id=None) for item in raw_trades]
     next_cursor: str | None = body.get("cursor") or None
-    return trades, env, next_cursor
+    return body, env, next_cursor
 
 
 async def get_historical_trades_page(
@@ -6312,7 +6274,7 @@ async def get_historical_trades_page(
     limit: int = _LIMIT_HIST_TRADES,
     min_ts: int | None = None,
     max_ts: int | None = None,
-) -> tuple[list[Trade], RawEnvelope, str | None]:
+) -> tuple[dict[str, Any], RawEnvelope, str | None]:
     """GET /historical/trades?ticker=... — one cursor page of historical trades.
 
     Same shape as ``get_trades_page``; different endpoint path.
@@ -6328,10 +6290,8 @@ async def get_historical_trades_page(
     body, env = await self._send(
         "GET", "/historical/trades", params=params, native_ids=[ticker]
     )
-    raw_trades = body.get("trades", [])
-    trades = [normalize_trade(item, raw_id=None) for item in raw_trades]
     next_cursor: str | None = body.get("cursor") or None
-    return trades, env, next_cursor
+    return body, env, next_cursor
 
 
 async def iter_trades(
@@ -6341,10 +6301,10 @@ async def iter_trades(
     since: int | None = None,
     until: int | None = None,
     historical: bool = False,
-) -> AsyncIterator[Trade]:
-    """Async generator yielding all Trade objects across cursor pages.
+) -> AsyncIterator[dict[str, Any]]:
+    """Async generator yielding raw trade objects across cursor pages.
 
-    Yields individual Trade objects; callers that need persistence should use
+    Yields individual raw trade dicts; callers that need persistence should use
     ``KalshiFetchService.iter_trades`` instead (which persists each page).
     The ``historical`` flag routes to ``/historical/trades``.
     """
@@ -6358,7 +6318,7 @@ async def iter_trades(
             page, env, next_cursor = await self.get_trades_page(
                 ticker, cursor=cursor, min_ts=since, max_ts=until
             )
-        for trade in page:
+        for trade in page.get("trades", []):
             yield trade
         if not next_cursor:
             break
@@ -6379,7 +6339,7 @@ async def iter_trades(
 - Parse `created_time` (ISO-8601 with `Z`) via `datetime.fromisoformat(s.replace("Z", "+00:00"))`. If `created_time` arrives as a Unix epoch int, fall back to `datetime.fromtimestamp(int(s), tz=UTC)`.
 - `market_native_id = item.get("ticker", "")` (Kalshi includes the ticker on each trade row).
 
-The function signature stays as in Task 5: `normalize_trade(item: dict[str, Any], *, raw_id: int | None = None) -> Trade`.
+The function signature stays as in Task 5: `normalize_trade(item: dict[str, Any], *, raw_id: int) -> Trade`.
 
 Add `iter_trades` to `src/pytheum/services/fetch.py`:
 
@@ -6405,29 +6365,22 @@ async def iter_trades(
     cursor: str | None = None
     while True:
         if historical:
-            page, env, next_cursor = await self.client.rest.get_historical_trades_page(
+            body, env, next_cursor = await self.client.rest.get_historical_trades_page(
                 ticker, cursor=cursor, min_ts=since, max_ts=until
             )
         else:
-            page, env, next_cursor = await self.client.rest.get_trades_page(
+            body, env, next_cursor = await self.client.rest.get_trades_page(
                 ticker, cursor=cursor, min_ts=since, max_ts=until
             )
+        raw_id = self._persist(env)
+        page = [
+            normalizer.normalize_trade(item, raw_id=raw_id)
+            for item in body.get("trades", [])
+        ]
         if page:
-            raw_id = self.repo.record_raw_rest(
-                venue=env.venue,
-                endpoint=env.endpoint,
-                request_params=env.request_params,
-                payload=env.payload,
-                received_ts=env.received_ts,
-                source_ts=env.source_ts,
-                status_code=env.status_code,
-                duration_ms=env.duration_ms,
-                schema_version=1,
-                native_ids=env.native_ids,
-            )
             self.repo.insert_trades(page, raw_id=raw_id, schema_version=1)
-            for trade in page:
-                yield trade
+        for trade in page:
+            yield trade
         if not next_cursor:
             break
         cursor = next_cursor
@@ -6555,9 +6508,9 @@ def test_fetch_market_writes_to_repository(tmp_path, monkeypatch):
 
     _orig_init = client_mod.KalshiClient.__init__
 
-    def _patched_init(self, *, config=None, signer=None, transport=None, **kw):
+    def _patched_init(self, *, config=None, signer=None, _transport=None, **kw):
         _orig_init(self, config=config, signer=signer,
-                   transport=_market_transport(ticker), **kw)
+                   _transport=_market_transport(ticker), **kw)
 
     monkeypatch.setattr(client_mod.KalshiClient, "__init__", _patched_init)
 
